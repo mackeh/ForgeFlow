@@ -217,7 +217,9 @@ function coerceFieldValue(field: QuickField, value: string) {
   return value;
 }
 
-export function Inspector({ node, onUpdate }: { node: Node | null; onUpdate: any }) {
+type OnUpdateNodes = (updater: (nodes: Node[]) => Node[]) => void;
+
+export function Inspector({ node, onUpdate }: { node: Node | null; onUpdate: OnUpdateNodes }) {
   const [json, setJson] = useState("");
 
   useEffect(() => {

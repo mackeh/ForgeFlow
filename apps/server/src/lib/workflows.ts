@@ -1,4 +1,10 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { AppError } from "./errors.js";
+import { asWorkflowDefinition, type WorkflowDefinition } from "./types.js";
+
+function asInputJson(value: unknown) {
+  return value as Prisma.InputJsonValue;
+}
 
 export async function ensureWorkflowVersion(
   prisma: PrismaClient,
@@ -17,7 +23,7 @@ export async function ensureWorkflowVersion(
       workflowId,
       version,
       status,
-      definition: definition as any,
+      definition: asInputJson(definition),
       notes
     }
   });
@@ -25,17 +31,17 @@ export async function ensureWorkflowVersion(
 
 export async function publishWorkflow(prisma: PrismaClient, workflowId: string, notes?: string) {
   const wf = await prisma.workflow.findUnique({ where: { id: workflowId } });
-  if (!wf) throw new Error("Workflow not found");
+  if (!wf) throw new AppError(404, "WORKFLOW_NOT_FOUND", "Workflow not found");
   const definition = wf.draftDefinition ?? wf.definition;
-  if (!definition) throw new Error("No draft definition to publish");
+  if (!definition) throw new AppError(400, "MISSING_DRAFT", "No draft definition to publish");
 
   const version = await ensureWorkflowVersion(prisma, workflowId, definition, "PUBLISHED", notes);
   return prisma.workflow.update({
     where: { id: workflowId },
     data: {
-      publishedDefinition: definition as any,
+      publishedDefinition: asInputJson(definition),
       publishedVersion: version.version,
-      definition: definition as any
+      definition: asInputJson(definition)
     }
   });
 }
@@ -50,8 +56,8 @@ export async function saveDraftWorkflow(
   return prisma.workflow.update({
     where: { id: workflowId },
     data: {
-      draftDefinition: definition as any,
-      definition: definition as any
+      draftDefinition: asInputJson(definition),
+      definition: asInputJson(definition)
     }
   });
 }
@@ -60,14 +66,14 @@ export async function rollbackWorkflow(prisma: PrismaClient, workflowId: string,
   const target = await prisma.workflowVersion.findUnique({
     where: { workflowId_version: { workflowId, version } }
   });
-  if (!target) throw new Error("Version not found");
+  if (!target) throw new AppError(404, "VERSION_NOT_FOUND", "Version not found");
 
   return prisma.workflow.update({
     where: { id: workflowId },
     data: {
-      draftDefinition: target.definition as any,
-      definition: target.definition as any,
-      publishedDefinition: target.status === "PUBLISHED" ? (target.definition as any) : undefined,
+      draftDefinition: asInputJson(target.definition),
+      definition: asInputJson(target.definition),
+      publishedDefinition: target.status === "PUBLISHED" ? asInputJson(target.definition) : undefined,
       publishedVersion: target.status === "PUBLISHED" ? target.version : undefined
     }
   });
@@ -77,7 +83,7 @@ export async function deleteWorkflow(prisma: PrismaClient, workflowId: string) {
   await prisma.$transaction(async (tx) => {
     const existing = await tx.workflow.findUnique({ where: { id: workflowId } });
     if (!existing) {
-      throw new Error("Workflow not found");
+      throw new AppError(404, "WORKFLOW_NOT_FOUND", "Workflow not found");
     }
     await tx.run.deleteMany({ where: { workflowId } });
     await tx.workflowVersion.deleteMany({ where: { workflowId } });
@@ -89,15 +95,15 @@ export async function getWorkflowDefinitionForRun(
   prisma: PrismaClient,
   workflowId: string,
   testMode: boolean
-): Promise<{ definition: any; version: number | null }> {
+): Promise<{ definition: WorkflowDefinition; version: number | null }> {
   const wf = await prisma.workflow.findUnique({ where: { id: workflowId } });
-  if (!wf) throw new Error("Workflow not found");
+  if (!wf) throw new AppError(404, "WORKFLOW_NOT_FOUND", "Workflow not found");
 
   if (testMode) {
-    const definition = (wf.draftDefinition ?? wf.definition ?? wf.publishedDefinition) as any;
+    const definition = asWorkflowDefinition(wf.draftDefinition ?? wf.definition ?? wf.publishedDefinition);
     return { definition, version: wf.publishedVersion ?? null };
   }
 
-  const definition = (wf.publishedDefinition ?? wf.definition ?? wf.draftDefinition) as any;
+  const definition = asWorkflowDefinition(wf.publishedDefinition ?? wf.definition ?? wf.draftDefinition);
   return { definition, version: wf.publishedVersion ?? null };
 }

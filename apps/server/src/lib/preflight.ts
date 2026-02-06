@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { access } from "fs/promises";
 import { resolvePlaywrightHeadless } from "./runner.js";
+import { asWorkflowDefinition, type WorkflowDefinition } from "./types.js";
+import { AppError } from "./errors.js";
 
 type ServiceState = "ok" | "warning" | "error";
 
@@ -20,10 +22,11 @@ type PreflightDeps = {
   checkDesktopReadyFn?: (baseUrl: string) => Promise<{ ok: boolean; message: string }>;
 };
 
-export async function preflightForDefinition(definition: any, deps: PreflightDeps = {}): Promise<PreflightResult> {
+export async function preflightForDefinition(rawDefinition: unknown, deps: PreflightDeps = {}): Promise<PreflightResult> {
+  const definition = asWorkflowDefinition(rawDefinition);
   const needsWeb = workflowNeedsWeb(definition);
   const needsDesktop = workflowNeedsDesktop(definition);
-  const headless = resolvePlaywrightHeadless({ data: {} }, definition?.execution);
+  const headless = resolvePlaywrightHeadless({ data: {} }, definition.execution);
   const checkHealthFn = deps.checkHealthFn || checkHealth;
   const hasDisplayAccessFn = deps.hasDisplayAccessFn || hasDisplayAccess;
   const checkDesktopReadyFn = deps.checkDesktopReadyFn || checkDesktopReady;
@@ -80,20 +83,20 @@ export async function preflightForDefinition(definition: any, deps: PreflightDep
 export async function preflightForWorkflowId(prisma: PrismaClient, workflowId: string) {
   const workflow = await prisma.workflow.findUnique({ where: { id: workflowId } });
   if (!workflow) {
-    throw new Error("Workflow not found");
+    throw new AppError(404, "WORKFLOW_NOT_FOUND", "Workflow not found");
   }
   const definition = workflow.draftDefinition ?? workflow.definition ?? workflow.publishedDefinition;
   return preflightForDefinition(definition);
 }
 
-export function workflowNeedsDesktop(definition: any): boolean {
-  const nodes = definition?.nodes || [];
-  return nodes.some((node: any) => String(node?.data?.type || node?.type || "").startsWith("desktop_"));
+export function workflowNeedsDesktop(rawDefinition: WorkflowDefinition | unknown): boolean {
+  const definition = asWorkflowDefinition(rawDefinition);
+  return definition.nodes.some((node) => String(node?.data?.type || node?.type || "").startsWith("desktop_"));
 }
 
-export function workflowNeedsWeb(definition: any): boolean {
-  const nodes = definition?.nodes || [];
-  return nodes.some((node: any) => String(node?.data?.type || node?.type || "").startsWith("playwright_"));
+export function workflowNeedsWeb(rawDefinition: WorkflowDefinition | unknown): boolean {
+  const definition = asWorkflowDefinition(rawDefinition);
+  return definition.nodes.some((node) => String(node?.data?.type || node?.type || "").startsWith("playwright_"));
 }
 
 async function checkHealth(baseUrl: string, path: string): Promise<boolean> {

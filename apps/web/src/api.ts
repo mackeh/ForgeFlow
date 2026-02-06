@@ -1,3 +1,12 @@
+import type {
+  WorkflowDefinition,
+  WorkflowRecord,
+  WorkflowRunDetail,
+  WorkflowRunSummary,
+  WorkflowSummary,
+  WorkflowVersion
+} from "./types";
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 type RequestError = Error & {
@@ -18,7 +27,7 @@ export function clearToken() {
   localStorage.removeItem("token");
 }
 
-async function request(path: string, options: RequestInit = {}) {
+async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const isLogin = path === "/api/auth/login";
   if (path.startsWith("/api/") && !isLogin && !token) {
@@ -55,14 +64,17 @@ async function request(path: string, options: RequestInit = {}) {
     requestError.details = errPayload;
     throw requestError;
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 export async function login(username: string, password: string, totpCode?: string) {
-  const data = await request("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password, totpCode })
-  });
+  const data = await request<{ token: string; user: { username: string; role: string; permissions: string[] } }>(
+    "/api/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ username, password, totpCode })
+    }
+  );
   setToken(data.token);
   return data;
 }
@@ -97,29 +109,35 @@ export function disableTwoFactor(token: string) {
 }
 
 export function getWorkflows() {
-  return request("/api/workflows");
+  return request<WorkflowSummary[]>("/api/workflows");
 }
 
-export function createWorkflow(payload: { name: string; definition: any }) {
-  return request("/api/workflows", {
+export function getWorkflow(id: string) {
+  return request<WorkflowRecord>(`/api/workflows/${id}`);
+}
+
+export function createWorkflow(payload: { name: string; definition: WorkflowDefinition }) {
+  return request<WorkflowRecord>("/api/workflows", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export function getTemplates() {
-  return request("/api/templates");
+  return request<Array<{ id: string; name: string; category: string; description?: string; definition: WorkflowDefinition }>>(
+    "/api/templates"
+  );
 }
 
 export function createWorkflowFromTemplate(payload: { templateId: string; name?: string }) {
-  return request("/api/workflows/from-template", {
+  return request<WorkflowRecord>("/api/workflows/from-template", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
-export function updateWorkflow(id: string, payload: { name?: string; definition?: any }) {
-  return request(`/api/workflows/${id}`, {
+export function updateWorkflow(id: string, payload: { name?: string; definition?: WorkflowDefinition }) {
+  return request<WorkflowRecord>(`/api/workflows/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
@@ -139,7 +157,7 @@ export function publishWorkflow(id: string, notes?: string) {
 }
 
 export function getWorkflowVersions(id: string) {
-  return request(`/api/workflows/${id}/versions`);
+  return request<WorkflowVersion[]>(`/api/workflows/${id}/versions`);
 }
 
 export function rollbackWorkflow(id: string, version: number) {
@@ -149,15 +167,18 @@ export function rollbackWorkflow(id: string, version: number) {
   });
 }
 
-export function startRun(workflowId: string, options?: { testMode?: boolean; inputData?: any; resumeFromRunId?: string }) {
-  return request("/api/runs/start", {
+export function startRun(
+  workflowId: string,
+  options?: { testMode?: boolean; inputData?: unknown; resumeFromRunId?: string }
+) {
+  return request<WorkflowRunSummary>("/api/runs/start", {
     method: "POST",
     body: JSON.stringify({ workflowId, ...(options || {}) })
   });
 }
 
 export function getWorkflowRuns(workflowId: string) {
-  return request(`/api/workflows/${workflowId}/runs`);
+  return request<WorkflowRunSummary[]>(`/api/workflows/${workflowId}/runs`);
 }
 
 export function getWorkflowPresence(workflowId: string) {
@@ -241,7 +262,7 @@ export function importCsv(payload: { text?: string; filePath?: string }) {
 }
 
 export function getRun(runId: string) {
-  return request(`/api/runs/${runId}`);
+  return request<WorkflowRunDetail>(`/api/runs/${runId}`);
 }
 
 export function approveRun(runId: string, nodeId: string, approved = true) {
@@ -294,7 +315,7 @@ export function createSchedule(payload: {
   testMode?: boolean;
   dependsOnScheduleId?: string;
   maintenanceWindows?: Array<{ start: string; end: string; weekdays?: number[] }>;
-  inputData?: any;
+  inputData?: unknown;
 }) {
   return request("/api/schedules", {
     method: "POST",
@@ -310,7 +331,7 @@ export function updateSchedule(id: string, payload: {
   testMode?: boolean;
   dependsOnScheduleId?: string;
   maintenanceWindows?: Array<{ start: string; end: string; weekdays?: number[] }>;
-  inputData?: any;
+  inputData?: unknown;
 }) {
   return request(`/api/schedules/${id}`, {
     method: "PUT",
@@ -447,7 +468,7 @@ export function testWebhook(id: string) {
 }
 
 export function runPreflight(payload: { workflowId?: string; definition?: any }) {
-  return request("/api/system/preflight", {
+  return request<{ ready: boolean; checks: Record<string, unknown>; messages: string[] }>("/api/system/preflight", {
     method: "POST",
     body: JSON.stringify(payload)
   });

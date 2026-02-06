@@ -81,6 +81,9 @@ import {
   normalizeRequestPath,
   statusClass
 } from "./lib/observability.js";
+import { AppCache } from "./lib/cache.js";
+import { AppError, toAppError } from "./lib/errors.js";
+import { asWorkflowDefinition } from "./lib/types.js";
 
 const app = express();
 const server = createServer(app);
@@ -95,9 +98,11 @@ const configuredLogLevel = String(process.env.LOG_LEVEL || "info").toLowerCase()
 const logLevel = configuredLogLevel === "warn" || configuredLogLevel === "error" ? configuredLogLevel : "info";
 const logger = createStructuredLogger("forgeflow-server", logLevel);
 const observability = new ObservabilityRegistry();
+const cache = new AppCache();
 let schedulerReady = false;
 let shuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
+type RequestWithMeta = express.Request & { requestId?: string };
 
 app.use(cors());
 app.use(express.json({ limit: "8mb" }));
@@ -134,7 +139,7 @@ app.use((req, res, next) => {
   const startedNs = process.hrtime.bigint();
   const requestPath = normalizeRequestPath(req.path || req.originalUrl.split("?")[0] || "/");
   const requestId = String(req.headers["x-request-id"] || randomUUID());
-  (req as any).requestId = requestId;
+  (req as RequestWithMeta).requestId = requestId;
   res.setHeader("x-request-id", requestId);
   observability.incrementGauge("forgeflow_http_in_flight_requests", 1);
 
@@ -428,6 +433,52 @@ function toOptionalBoolean(value: unknown) {
   return undefined;
 }
 
+const CACHE_TTL = {
+  templatesMs: 30 * 60 * 1000,
+  workflowsListMs: 15 * 1000,
+  workflowDetailMs: 15 * 1000,
+  integrationsMs: 15 * 1000,
+  dashboardMs: 20 * 1000
+};
+
+function respondWithError(
+  res: express.Response,
+  error: unknown,
+  fallbackStatus = 400,
+  fallbackCode = "BAD_REQUEST"
+) {
+  const appError = toAppError(error, fallbackStatus, fallbackCode);
+  const payload: { error: string; code: string; details?: unknown } = {
+    error: appError.message,
+    code: appError.code
+  };
+  if (appError.details !== undefined) {
+    payload.details = appError.details;
+  }
+  res.status(appError.status).json(payload);
+}
+
+function workflowListCacheKey() {
+  return "workflows:list";
+}
+
+function workflowDetailCacheKey(workflowId: string) {
+  return `workflow:detail:${workflowId}`;
+}
+
+function dashboardCacheKey(days: number, timezone: string) {
+  return `metrics:dashboard:${days}:${timezone}`;
+}
+
+async function invalidateWorkflowCaches(workflowId?: string) {
+  await cache.del(workflowListCacheKey());
+  if (workflowId) {
+    await cache.del(workflowDetailCacheKey(workflowId));
+  } else {
+    await cache.delByPrefix("workflow:detail:");
+  }
+}
+
 async function writeAuditEvent(
   req: express.Request,
   payload: {
@@ -441,7 +492,7 @@ async function writeAuditEvent(
 ) {
   try {
     const auth = getAuthContext(req);
-    const requestId = String((req as any).requestId || "");
+    const requestId = String((req as RequestWithMeta).requestId || "");
     await appendAuditEvent({
       actorUsername: auth?.username || "system",
       actorRole: auth?.role || "system",
@@ -471,8 +522,9 @@ app.get("/api/system/time", (_req, res) => {
   res.json({ nowUtc: now.toISOString(), timezone, localTime });
 });
 
-app.get("/api/templates", canReadTemplates, (_req, res) => {
-  res.json(listWorkflowTemplates());
+app.get("/api/templates", canReadTemplates, async (_req, res) => {
+  const templates = await cache.getOrSet("templates:list", CACHE_TTL.templatesMs, async () => listWorkflowTemplates());
+  res.json(templates);
 });
 
 app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => {
@@ -491,14 +543,17 @@ app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => 
     return;
   }
 
+  const typedTemplate = asWorkflowDefinition(template.definition);
   const workflow = await prisma.workflow.create({
     data: {
       name: parsed.data.name?.trim() || template.name,
-      definition: template.definition as any,
-      draftDefinition: template.definition as any
+      definition: typedTemplate as any,
+      draftDefinition: typedTemplate as any
     }
   });
-  await saveDraftWorkflow(prisma, workflow.id, template.definition, `Created from template ${template.id}`);
+  await saveDraftWorkflow(prisma, workflow.id, typedTemplate, `Created from template ${template.id}`);
+  await invalidateWorkflowCaches(workflow.id);
+  await cache.delByPrefix("metrics:dashboard:");
   await writeAuditEvent(req, {
     action: "workflow.create_from_template",
     resourceType: "workflow",
@@ -512,8 +567,30 @@ app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => 
 });
 
 app.get("/api/workflows", canReadWorkflows, async (_req, res) => {
-  const workflows = await prisma.workflow.findMany({ orderBy: { updatedAt: "desc" } });
+  const workflows = await cache.getOrSet(workflowListCacheKey(), CACHE_TTL.workflowsListMs, async () =>
+    prisma.workflow.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        publishedVersion: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    })
+  );
   res.json(workflows);
+});
+
+app.get("/api/workflows/:id", canReadWorkflows, async (req, res) => {
+  const workflow = await cache.getOrSet(workflowDetailCacheKey(req.params.id), CACHE_TTL.workflowDetailMs, async () =>
+    prisma.workflow.findUnique({ where: { id: req.params.id } })
+  );
+  if (!workflow) {
+    respondWithError(res, new AppError(404, "WORKFLOW_NOT_FOUND", "Workflow not found"), 404, "WORKFLOW_NOT_FOUND");
+    return;
+  }
+  res.json(workflow);
 });
 
 app.get("/api/workflows/:id/collab/presence", canReadWorkflows, (req, res) => {
@@ -568,7 +645,7 @@ app.post("/api/workflows/:id/comments", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -608,7 +685,7 @@ app.delete("/api/workflows/:id/comments/:commentId", canWriteWorkflows, async (r
         commentId: req.params.commentId
       }
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -641,7 +718,7 @@ app.get("/api/workflows/:id/history", canReadWorkflows, async (req, res) => {
 });
 
 app.get("/api/integrations", canWriteWorkflows, async (_req, res) => {
-  const integrations = await listIntegrations();
+  const integrations = await cache.getOrSet("integrations:list", CACHE_TTL.integrationsMs, async () => listIntegrations());
   res.json(integrations);
 });
 
@@ -657,7 +734,8 @@ app.post("/api/integrations", canWriteWorkflows, async (req, res) => {
     return;
   }
   try {
-    const integration = await createIntegration(parsed.data as any);
+    const integration = await createIntegration(parsed.data);
+    await cache.del("integrations:list");
     await writeAuditEvent(req, {
       action: "integration.create",
       resourceType: "integration",
@@ -675,7 +753,7 @@ app.post("/api/integrations", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -691,7 +769,8 @@ app.put("/api/integrations/:id", canWriteWorkflows, async (req, res) => {
     return;
   }
   try {
-    const integration = await updateIntegration(req.params.id, parsed.data as any);
+    const integration = await updateIntegration(req.params.id, parsed.data);
+    await cache.del("integrations:list");
     await writeAuditEvent(req, {
       action: "integration.update",
       resourceType: "integration",
@@ -706,7 +785,7 @@ app.put("/api/integrations/:id", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -721,6 +800,7 @@ app.delete("/api/integrations/:id", canWriteWorkflows, async (req, res) => {
     resourceType: "integration",
     resourceId: req.params.id
   });
+  await cache.del("integrations:list");
   res.json({ ok: true });
 });
 
@@ -773,7 +853,7 @@ app.post("/api/workflows", canWriteWorkflows, async (req, res) => {
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
-  const initialDefinition = parsed.data.definition || {
+  const initialDefinition = asWorkflowDefinition(parsed.data.definition || {
     nodes: [{ id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } }],
     edges: [],
     execution: {
@@ -781,13 +861,13 @@ app.post("/api/workflows", canWriteWorkflows, async (req, res) => {
       defaultRetries: 2,
       defaultNodeTimeoutMs: 30000
     }
-  };
+  });
 
   const workflow = await prisma.workflow.create({
     data: {
       name: parsed.data.name,
-      definition: initialDefinition,
-      draftDefinition: initialDefinition
+      definition: initialDefinition as any,
+      draftDefinition: initialDefinition as any
     }
   });
   await saveDraftWorkflow(prisma, workflow.id, initialDefinition, "Initial draft");
@@ -797,6 +877,8 @@ app.post("/api/workflows", canWriteWorkflows, async (req, res) => {
     resourceId: workflow.id,
     metadata: { name: workflow.name }
   });
+  await invalidateWorkflowCaches(workflow.id);
+  await cache.delByPrefix("metrics:dashboard:");
   res.json(workflow);
 });
 
@@ -809,12 +891,12 @@ app.put("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
   }
 
   try {
-    const payload: any = {};
+    const payload: { name?: string } = {};
     if (parsed.data.name) payload.name = parsed.data.name;
 
     let workflow;
     if (parsed.data.definition !== undefined) {
-      workflow = await saveDraftWorkflow(prisma, req.params.id, parsed.data.definition, parsed.data.notes);
+      workflow = await saveDraftWorkflow(prisma, req.params.id, asWorkflowDefinition(parsed.data.definition), parsed.data.notes);
       if (payload.name) {
         workflow = await prisma.workflow.update({ where: { id: req.params.id }, data: payload });
       }
@@ -830,6 +912,7 @@ app.put("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
         definitionUpdated: parsed.data.definition !== undefined
       }
     });
+    await invalidateWorkflowCaches(req.params.id);
     res.json(workflow);
   } catch (error) {
     await writeAuditEvent(req, {
@@ -839,7 +922,7 @@ app.put("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -860,6 +943,7 @@ app.post("/api/workflows/:id/publish", canWriteWorkflows, async (req, res) => {
         version: published.publishedVersion
       }
     });
+    await invalidateWorkflowCaches(req.params.id);
     res.json(published);
   } catch (error) {
     await writeAuditEvent(req, {
@@ -869,14 +953,21 @@ app.post("/api/workflows/:id/publish", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
 app.get("/api/workflows/:id/versions", canReadWorkflows, async (req, res) => {
   const versions = await prisma.workflowVersion.findMany({
     where: { workflowId: req.params.id },
-    orderBy: { version: "desc" }
+    orderBy: { version: "desc" },
+    select: {
+      id: true,
+      version: true,
+      status: true,
+      notes: true,
+      createdAt: true
+    }
   });
   res.json(versions);
 });
@@ -898,6 +989,7 @@ app.post("/api/workflows/:id/rollback", canWriteWorkflows, async (req, res) => {
         version: parsed.data.version
       }
     });
+    await invalidateWorkflowCaches(req.params.id);
     res.json(rolled);
   } catch (error) {
     await writeAuditEvent(req, {
@@ -907,7 +999,7 @@ app.post("/api/workflows/:id/rollback", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -921,6 +1013,8 @@ app.delete("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
       resourceType: "workflow",
       resourceId: req.params.id
     });
+    await invalidateWorkflowCaches(req.params.id);
+    await cache.delByPrefix("metrics:dashboard:");
     res.json({ ok: true });
   } catch (error) {
     await writeAuditEvent(req, {
@@ -930,7 +1024,7 @@ app.delete("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(404).json({ error: String(error) });
+    respondWithError(res, error, 404, "WORKFLOW_NOT_FOUND");
   }
 });
 
@@ -946,8 +1040,9 @@ app.get("/api/schedules", canManageSchedules, async (req, res) => {
   );
 });
 
-app.get("/api/schedules/presets", canManageSchedules, (_req, res) => {
-  res.json(listSchedulePresets());
+app.get("/api/schedules/presets", canManageSchedules, async (_req, res) => {
+  const presets = await cache.getOrSet("schedules:presets", CACHE_TTL.templatesMs, async () => listSchedulePresets());
+  res.json(presets);
 });
 
 app.get("/api/schedules/upcoming", canManageSchedules, async (req, res) => {
@@ -1036,6 +1131,7 @@ app.post("/api/schedules", canManageSchedules, async (req, res) => {
       timezone: normalizeScheduleTimezone(parsed.data.timezone)
     });
     await scheduler.refresh();
+    await cache.delByPrefix("metrics:dashboard:");
     await writeAuditEvent(req, {
       action: "schedule.create",
       resourceType: "schedule",
@@ -1057,7 +1153,7 @@ app.post("/api/schedules", canManageSchedules, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -1085,6 +1181,7 @@ app.put("/api/schedules/:id", canManageSchedules, async (req, res) => {
   try {
     const schedule = await updateSchedule(req.params.id, parsed.data);
     await scheduler.refresh();
+    await cache.delByPrefix("metrics:dashboard:");
     await writeAuditEvent(req, {
       action: "schedule.update",
       resourceType: "schedule",
@@ -1103,7 +1200,7 @@ app.put("/api/schedules/:id", canManageSchedules, async (req, res) => {
       success: false,
       message: String(error)
     });
-    res.status(404).json({ error: String(error) });
+    respondWithError(res, error, 404, "SCHEDULE_NOT_FOUND");
   }
 });
 
@@ -1126,6 +1223,7 @@ app.delete("/api/schedules/:id", canManageSchedules, async (req, res) => {
     resourceType: "schedule",
     resourceId: req.params.id
   });
+  await cache.delByPrefix("metrics:dashboard:");
   res.json({ ok: true });
 });
 
@@ -1142,6 +1240,7 @@ app.post("/api/schedules/:id/run-now", canManageSchedules, async (req, res) => {
     resourceId: req.params.id,
     metadata: { executed }
   });
+  await cache.delByPrefix("metrics:dashboard:");
   res.json({ ok: true, executed });
 });
 
@@ -1162,7 +1261,7 @@ app.post("/api/runs/start", canExecuteWorkflows, async (req, res) => {
     const testMode = Boolean(parsed.data.testMode);
     const { version } = await getWorkflowDefinitionForRun(prisma, parsed.data.workflowId, testMode);
 
-    let resumePayload: any = {};
+    let resumePayload: Record<string, unknown> = {};
     if (parsed.data.resumeFromRunId) {
       const prev = await prisma.run.findUnique({ where: { id: parsed.data.resumeFromRunId } });
       if (prev) {
@@ -1206,6 +1305,7 @@ app.post("/api/runs/start", canExecuteWorkflows, async (req, res) => {
         resumeFromRunId: parsed.data.resumeFromRunId || null
       }
     });
+    await cache.delByPrefix("metrics:dashboard:");
     res.json(run);
   } catch (error) {
     await writeAuditEvent(req, {
@@ -1218,7 +1318,7 @@ app.post("/api/runs/start", canExecuteWorkflows, async (req, res) => {
         testMode: Boolean(parsed.data.testMode)
       }
     });
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -1247,7 +1347,7 @@ app.post("/api/system/preflight", canExecuteWorkflows, async (req, res) => {
     const result = await preflightForDefinition({ nodes: [], edges: [] });
     res.json(result);
   } catch (error) {
-    res.status(400).json({ error: String(error) });
+    respondWithError(res, error);
   }
 });
 
@@ -1255,7 +1355,19 @@ app.get("/api/workflows/:id/runs", canReadWorkflows, async (req, res) => {
   const runs = await prisma.run.findMany({
     where: { workflowId: req.params.id },
     orderBy: { createdAt: "desc" },
-    take: 30
+    take: 30,
+    select: {
+      id: true,
+      workflowId: true,
+      workflowVersion: true,
+      testMode: true,
+      status: true,
+      checkpointNodeId: true,
+      resumeFromRunId: true,
+      startedAt: true,
+      finishedAt: true,
+      createdAt: true
+    }
   });
   res.json(runs);
 });
@@ -1283,14 +1395,17 @@ app.post("/api/runs/:id/approve", canApproveWorkflows, async (req, res) => {
     return;
   }
 
-  const context = (run.context || {}) as Record<string, any>;
+  const context =
+    run.context && typeof run.context === "object" && !Array.isArray(run.context)
+      ? ({ ...(run.context as Record<string, unknown>) } as Record<string, unknown> & { __approvals?: Record<string, boolean> })
+      : ({} as Record<string, unknown> & { __approvals?: Record<string, boolean> });
   context.__approvals = context.__approvals || {};
   context.__approvals[parsed.data.nodeId] = parsed.data.approved;
 
   await prisma.run.update({
     where: { id: run.id },
     data: {
-      context,
+      context: context as any,
       status: parsed.data.approved ? "PENDING" : "FAILED"
     }
   });
@@ -1311,6 +1426,7 @@ app.post("/api/runs/:id/approve", canApproveWorkflows, async (req, res) => {
       approved: parsed.data.approved
     }
   });
+  await cache.delByPrefix("metrics:dashboard:");
   res.json({ ok: true });
 });
 
@@ -1334,46 +1450,58 @@ app.get("/api/runs/:id/diff-last-success", canReadWorkflows, async (req, res) =>
     res.json({ hasBaseline: false, changes: [] });
     return;
   }
-  res.json(diffRunNodeStates(run as any, prev as any));
+  res.json(diffRunNodeStates(run, prev));
 });
 
 app.get("/api/metrics/dashboard", canReadMetrics, async (req, res) => {
   const daysRaw = typeof req.query.days === "string" ? Number(req.query.days) : 7;
   const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(30, Math.floor(daysRaw))) : 7;
   const timezone = normalizeScheduleTimezone(typeof req.query.timezone === "string" ? req.query.timezone : undefined);
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const payload = await cache.getOrSet(dashboardCacheKey(days, timezone), CACHE_TTL.dashboardMs, async () => {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const runs = await prisma.run.findMany({
+      where: { createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 2000,
+      select: {
+        id: true,
+        status: true,
+        workflowId: true,
+        createdAt: true,
+        startedAt: true,
+        finishedAt: true,
+        logs: true,
+        workflow: { select: { id: true, name: true } }
+      }
+    });
+    const schedules = await listSchedules();
+    const activeSchedules = schedules.filter((schedule) => schedule.enabled).length;
+    const metrics = buildDashboardMetrics(runs, timezone, days);
+    const memory = process.memoryUsage();
+    const loadAvg = os.loadavg();
 
-  const runs = await prisma.run.findMany({
-    where: { createdAt: { gte: since } },
-    include: { workflow: { select: { id: true, name: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 2000
+    return {
+      ...metrics,
+      schedules: {
+        total: schedules.length,
+        active: activeSchedules,
+        disabled: schedules.length - activeSchedules
+      },
+      resources: {
+        activeRuns: getActiveRunCount(),
+        uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+        rssBytes: memory.rss,
+        heapUsedBytes: memory.heapUsed,
+        heapTotalBytes: memory.heapTotal,
+        externalBytes: memory.external,
+        loadAverage1m: Number(loadAvg[0].toFixed(2)),
+        loadAverage5m: Number(loadAvg[1].toFixed(2)),
+        loadAverage15m: Number(loadAvg[2].toFixed(2))
+      }
+    };
   });
-  const schedules = await listSchedules();
-  const activeSchedules = schedules.filter((schedule) => schedule.enabled).length;
-  const metrics = buildDashboardMetrics(runs as any, timezone, days);
-  const memory = process.memoryUsage();
-  const loadAvg = os.loadavg();
 
-  res.json({
-    ...metrics,
-    schedules: {
-      total: schedules.length,
-      active: activeSchedules,
-      disabled: schedules.length - activeSchedules
-    },
-    resources: {
-      activeRuns: getActiveRunCount(),
-      uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
-      rssBytes: memory.rss,
-      heapUsedBytes: memory.heapUsed,
-      heapTotalBytes: memory.heapTotal,
-      externalBytes: memory.external,
-      loadAverage1m: Number(loadAvg[0].toFixed(2)),
-      loadAverage5m: Number(loadAvg[1].toFixed(2)),
-      loadAverage15m: Number(loadAvg[2].toFixed(2))
-    }
-  });
+  res.json(payload);
 });
 
 app.get("/api/admin/users", canManageUsers, async (_req, res) => {
@@ -1773,6 +1901,7 @@ async function gracefulShutdown(signal: string) {
         wss.close(() => resolve());
       })
     ]);
+    await cache.disconnect();
     await prisma.$disconnect();
     logger.info("shutdown.complete");
   })()

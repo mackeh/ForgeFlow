@@ -1,8 +1,17 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import type { WorkflowSummary } from "../types";
 
-export function Sidebar({ workflows, activeId, onSelect, onCreate, children }: any) {
+type SidebarProps = {
+  workflows: WorkflowSummary[];
+  activeId?: string | null;
+  onSelect: (workflow: WorkflowSummary) => void;
+  onCreate: () => void;
+  children?: ReactNode;
+};
+
+export function Sidebar({ workflows, activeId, onSelect, onCreate, children }: SidebarProps) {
   const [filter, setFilter] = useState("");
-  const filtered = workflows.filter((w: any) => w.name.toLowerCase().includes(filter.toLowerCase()));
+  const filtered = workflows.filter((w) => w.name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
     <aside className="sidebar">
@@ -17,7 +26,7 @@ export function Sidebar({ workflows, activeId, onSelect, onCreate, children }: a
         onChange={(e) => setFilter(e.target.value)}
       />
       <div className="workflow-list">
-        {filtered.map((wf: any) => (
+        {filtered.map((wf) => (
           <button
             key={wf.id}
             className={wf.id === activeId ? "workflow-item active" : "workflow-item"}

@@ -38,6 +38,7 @@ import {
   getRoles,
   getRun,
   getRunDiff,
+  getWorkflow,
   getSchedulePresets,
   getSchedules,
   getUpcomingSchedules,
@@ -76,6 +77,7 @@ import {
 import { ActionNode } from "./components/ActionNode";
 import { Sidebar } from "./components/Sidebar";
 import { Inspector } from "./components/Inspector";
+import type { WorkflowDefinition, WorkflowRecord, WorkflowRunDetail, WorkflowRunSummary, WorkflowSummary, WorkflowVersion } from "./types";
 
 const nodeTypes = { action: ActionNode };
 type ToastLevel = "info" | "success" | "error";
@@ -189,7 +191,7 @@ type TwoFactorSetupPayload = {
   qrCodeUrl: string;
 };
 
-const defaultDefinition = {
+const defaultDefinition: WorkflowDefinition = {
   nodes: [
     {
       id: "start",
@@ -235,17 +237,17 @@ function formatBytes(value: number | null | undefined) {
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [loginTotpCode, setLoginTotpCode] = useState("");
-  const [workflowList, setWorkflowList] = useState<any[]>([]);
-  const [activeWorkflow, setActiveWorkflow] = useState<any | null>(null);
+  const [workflowList, setWorkflowList] = useState<WorkflowSummary[]>([]);
+  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowRecord | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(defaultDefinition.nodes as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState(defaultDefinition.edges as Edge[]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [status, setStatus] = useState<string>("");
   const [desktopRecording, setDesktopRecording] = useState(false);
-  const [runs, setRuns] = useState<any[]>([]);
-  const [activeRun, setActiveRun] = useState<any | null>(null);
+  const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [activeRun, setActiveRun] = useState<WorkflowRunDetail | null>(null);
   const [runDiff, setRunDiff] = useState<any | null>(null);
-  const [versions, setVersions] = useState<any[]>([]);
+  const [versions, setVersions] = useState<WorkflowVersion[]>([]);
   const [rollbackVersion, setRollbackVersion] = useState<number | "">("");
   const [secrets, setSecrets] = useState<any[]>([]);
   const [secretKey, setSecretKey] = useState("");
@@ -943,12 +945,14 @@ export default function App() {
     setWorkflowHistory(historyResult as WorkflowHistory);
   };
 
-  const selectWorkflow = async (workflow: any) => {
-    setActiveWorkflow(workflow);
-    const def = workflow.draftDefinition || workflow.definition || defaultDefinition;
+  const selectWorkflow = async (workflow: WorkflowSummary | WorkflowRecord) => {
+    const fullWorkflow =
+      "definition" in workflow || "draftDefinition" in workflow ? (workflow as WorkflowRecord) : await getWorkflow(workflow.id);
+    setActiveWorkflow(fullWorkflow);
+    const def = fullWorkflow.draftDefinition || fullWorkflow.definition || defaultDefinition;
     setNodes(def.nodes || defaultDefinition.nodes);
     setEdges(def.edges || []);
-    await Promise.all([refreshWorkflowMeta(workflow.id), refreshWorkflowCollaboration(workflow.id)]);
+    await Promise.all([refreshWorkflowMeta(fullWorkflow.id), refreshWorkflowCollaboration(fullWorkflow.id)]);
   };
 
   const onConnect = (connection: Connection) => {
@@ -1097,7 +1101,7 @@ export default function App() {
     setFeedback(`Rolled back to version ${rollbackVersion}`, "success");
     await refreshWorkflows();
     const latest = await getWorkflows();
-    const wf = latest.find((x: any) => x.id === activeWorkflow.id);
+    const wf = latest.find((x) => x.id === activeWorkflow.id);
     if (wf) await selectWorkflow(wf);
   };
 
@@ -1154,7 +1158,7 @@ export default function App() {
     setFeedback("Auto layout complete", "success");
   };
 
-  const handleAddNode = (type: string, dataOverrides: Record<string, any> = {}): string => {
+  const handleAddNode = (type: string, dataOverrides: Record<string, unknown> = {}): string => {
     const id = `${type}-${Date.now()}`;
     const lastNode = nodesRef.current[nodesRef.current.length - 1];
     const sourceNode = selectedNode || lastNode || null;
@@ -1195,7 +1199,7 @@ export default function App() {
     setFeedback(`Deleted node ${selectedNode.id}`, "info");
   };
 
-  const validateWorkflowDefinition = (definition: any) => {
+  const validateWorkflowDefinition = (definition: WorkflowDefinition) => {
     const validationErrors: string[] = [];
     const allNodes = Array.isArray(definition?.nodes) ? definition.nodes : [];
     const allEdges = Array.isArray(definition?.edges) ? definition.edges : [];
@@ -1880,7 +1884,7 @@ export default function App() {
       <Sidebar
         workflows={workflowList}
         activeId={activeWorkflow?.id}
-        onSelect={(wf: any) => {
+        onSelect={(wf) => {
           selectWorkflow(wf).catch(showError);
         }}
         onCreate={() => {

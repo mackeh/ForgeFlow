@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Handle, Position } from "reactflow";
 import { API_URL } from "../api";
 import { imagePathToUrl } from "../utils";
+import type { ActionNodeData } from "../types";
 
-export function ActionNode({ data }: any) {
+export function ActionNode({ data }: { data: ActionNodeData }) {
   const previewUrl = data?.type === "desktop_click_image" ? imagePathToUrl(API_URL, data.imagePath) : null;
   const runStatus = String(data?.__runStatus || "");
   const runDurationMs =

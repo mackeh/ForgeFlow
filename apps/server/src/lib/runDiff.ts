@@ -1,8 +1,24 @@
 type NodeStateRecord = Record<string, { status?: string; durationMs?: number }>;
+type RunDiffChange = {
+  nodeId: string;
+  statusBefore?: string;
+  statusNow?: string;
+  durationBefore?: number;
+  durationNow?: number;
+  changed: boolean;
+};
+type RunDiffResult = {
+  hasBaseline: boolean;
+  baselineRunId?: string;
+  changes: RunDiffChange[];
+};
 
-export function diffRunNodeStates(run: { id: string; nodeStates?: unknown }, previousSuccess: { id: string; nodeStates?: unknown } | null) {
+export function diffRunNodeStates(
+  run: { id: string; nodeStates?: unknown },
+  previousSuccess: { id: string; nodeStates?: unknown } | null
+): RunDiffResult {
   if (!previousSuccess) {
-    return { hasBaseline: false, changes: [] as any[] };
+    return { hasBaseline: false, changes: [] };
   }
 
   const currentStates = ((run.nodeStates || {}) as NodeStateRecord) || {};
