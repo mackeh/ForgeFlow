@@ -1,4 +1,4 @@
-# RPA Local (UIPath-style) Reliability Build
+# RPA Local node-graph Build
 
 Single-user local RPA with node-graph orchestration, resilient execution, web + desktop automation, recorder support, local LLM cleanup, run diagnostics, and workflow version lifecycle. Runs entirely on your machine with Docker.
 
