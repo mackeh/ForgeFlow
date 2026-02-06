@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+
+# Runtime/OS
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated/runtime folders
+apps/agent/recordings/
+apps/server/artifacts/
+
+# IDE
+.vscode/
+.idea/

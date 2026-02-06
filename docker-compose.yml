@@ -1,0 +1,75 @@
+services:
+  db:
+    image: postgres:16
+    container_name: rpa-db
+    environment:
+      POSTGRES_USER: rpa
+      POSTGRES_PASSWORD: rpa
+      POSTGRES_DB: rpa
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: rpa-redis
+    ports:
+      - "6379:6379"
+
+  ollama:
+    image: ollama/ollama
+    container_name: rpa-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  server:
+    build:
+      context: ./apps/server
+    container_name: rpa-server
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+      - redis
+      - ollama
+    volumes:
+      - ./apps/server:/app
+      - /app/node_modules
+      - ./apps/agent/recordings:/recordings
+      - ./apps/server/artifacts:/app/artifacts
+
+  web:
+    build:
+      context: ./apps/web
+    container_name: rpa-web
+    environment:
+      VITE_API_URL: http://localhost:8080
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    depends_on:
+      - server
+
+  agent:
+    build:
+      context: ./apps/agent
+    container_name: rpa-agent
+    env_file: .env
+    environment:
+      DISPLAY: ${DISPLAY}
+    ports:
+      - "7001:7001"
+    volumes:
+      - ./apps/agent:/app
+      - ./apps/agent/recordings:/app/recordings
+      - /tmp/.X11-unix:/tmp/.X11-unix
+
+volumes:
+  db_data:
+  ollama_data:

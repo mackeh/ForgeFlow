@@ -1,0 +1,376 @@
+:root {
+  --bg: #0b1116;
+  --panel: #111a22;
+  --panel-2: #16212c;
+  --accent: #f58b1f;
+  --accent-2: #2cb9b0;
+  --text: #f4f6f7;
+  --muted: #9aa7b2;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", "Archivo", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at top, #15202b, #0b1116 60%);
+}
+
+#root {
+  height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr 320px;
+  height: 100vh;
+}
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sidebar h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.sidebar button {
+  background: var(--accent);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 10px;
+  color: #111;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.search {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: var(--text);
+}
+
+.workflow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.sidebar-extra {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-extra input,
+.sidebar-extra select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.sidebar-extra small {
+  color: var(--muted);
+}
+
+.workflow-item {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: var(--text);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.workflow-item.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(245, 139, 31, 0.4);
+}
+
+.canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(12, 18, 24, 0.95);
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.toolbar button.primary {
+  background: var(--accent);
+  color: #111;
+  border: none;
+}
+
+.status-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 6px 12px;
+  background: rgba(10, 14, 18, 0.7);
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.run-drawer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 30px;
+  background: rgba(9, 14, 19, 0.92);
+  border-top: 1px solid var(--border);
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-item.active {
+  border-color: var(--accent-2);
+}
+
+.run-item small {
+  color: var(--muted);
+}
+
+.run-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inspector {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspector label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.inspector textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px;
+  font-family: "Archivo", sans-serif;
+}
+
+.inspector-thumb {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.inspector button {
+  background: var(--accent-2);
+  color: #0b1116;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.readonly {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.node-card {
+  background: linear-gradient(135deg, #1b2732, #0f171f);
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  border-radius: 14px;
+  min-width: 160px;
+  box-shadow: var(--shadow);
+  position: relative;
+}
+
+.node-thumb {
+  width: 100%;
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  max-height: 120px;
+}
+
+.node-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  background: rgba(8, 12, 16, 0.95);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  max-width: 240px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.node-card:hover .node-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.node-title {
+  font-weight: 600;
+}
+
+.node-type {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.login {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, #13212d, #0b1116 60%);
+}
+
+.login-card {
+  background: var(--panel);
+  padding: 40px;
+  border-radius: 24px;
+  width: 340px;
+  box-shadow: var(--shadow);
+}
+
+.login-card h1 {
+  margin-top: 0;
+}
+
+.login-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: var(--text);
+}
+
+.login button {
+  background: var(--accent);
+  border: none;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status {
+  font-size: 12px;
+  color: var(--accent-2);
+}
+
+@media (max-width: 1080px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+
+  .sidebar,
+  .inspector {
+    border: none;
+  }
+}

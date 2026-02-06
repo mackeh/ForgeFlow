@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  WAITING_APPROVAL
+  SUCCEEDED
+  FAILED
+}
+
+model Workflow {
+  id                 String            @id @default(cuid())
+  name               String
+  definition         Json?
+  draftDefinition    Json?
+  publishedDefinition Json?
+  publishedVersion   Int?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  runs               Run[]
+  versions           WorkflowVersion[]
+}
+
+model Run {
+  id             String    @id @default(cuid())
+  workflow       Workflow  @relation(fields: [workflowId], references: [id])
+  workflowId     String
+  workflowVersion Int?
+  testMode       Boolean   @default(false)
+  status         RunStatus @default(PENDING)
+  logs           Json?
+  nodeStates     Json?
+  context        Json?
+  checkpointNodeId String?
+  artifacts      Json?
+  inputData      Json?
+  resumeFromRunId String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+enum WorkflowReleaseStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model WorkflowVersion {
+  id         String                @id @default(cuid())
+  workflow   Workflow              @relation(fields: [workflowId], references: [id])
+  workflowId String
+  version    Int
+  status     WorkflowReleaseStatus
+  definition Json
+  notes      String?
+  createdAt  DateTime              @default(now())
+
+  @@unique([workflowId, version])
+}
+
+model Secret {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  valueEnc  String
+  nonce     String
+  tag       String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
