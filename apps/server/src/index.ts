@@ -15,6 +15,7 @@ import {
   saveDraftWorkflow
 } from "./lib/workflows.js";
 import { listSecrets, upsertSecret } from "./lib/secrets.js";
+import { preflightForDefinition, preflightForWorkflowId } from "./lib/preflight.js";
 
 const app = express();
 const server = createServer(app);
@@ -203,6 +204,35 @@ app.post("/api/runs/start", async (req, res) => {
   }
 });
 
+app.post("/api/system/preflight", async (req, res) => {
+  const schema = z.object({
+    workflowId: z.string().optional(),
+    definition: z.any().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+
+  try {
+    if (parsed.data.definition) {
+      const result = await preflightForDefinition(parsed.data.definition);
+      res.json(result);
+      return;
+    }
+    if (parsed.data.workflowId) {
+      const result = await preflightForWorkflowId(prisma, parsed.data.workflowId);
+      res.json(result);
+      return;
+    }
+    const result = await preflightForDefinition({ nodes: [], edges: [] });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
 app.get("/api/workflows/:id/runs", async (req, res) => {
   const runs = await prisma.run.findMany({
     where: { workflowId: req.params.id },
@@ -310,8 +340,13 @@ app.post("/api/secrets", async (req, res) => {
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
-  await upsertSecret(prisma, parsed.data.key, parsed.data.value);
-  res.json({ ok: true });
+  try {
+    await upsertSecret(prisma, parsed.data.key, parsed.data.value);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(`[SECRETS] Error upserting secret:`, err);
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 app.post("/api/recorders/web/start", async (req, res) => {

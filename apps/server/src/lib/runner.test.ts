@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSelectorCandidates, orderNodes } from "./runner.js";
+import { buildSelectorCandidates, orderNodes, resolvePlaywrightHeadless } from "./runner.js";
 
 test("orderNodes returns all nodes even with cycle", () => {
   const definition = {
@@ -33,4 +33,14 @@ test("buildSelectorCandidates creates prioritized strategies", () => {
   assert.deepEqual(list[0], { kind: "css", selector: "#one" });
   assert.equal(list.some((item) => item.kind === "role"), true);
   assert.equal(list.some((item) => item.kind === "xpath"), true);
+});
+
+test("resolvePlaywrightHeadless prefers node override, then workflow defaults, then env", () => {
+  process.env.PLAYWRIGHT_HEADLESS = "true";
+  assert.equal(resolvePlaywrightHeadless({ data: { headless: false } }, { playwrightHeadless: true }), false);
+  assert.equal(resolvePlaywrightHeadless({ data: {} }, { playwrightHeadless: false }), false);
+  assert.equal(resolvePlaywrightHeadless({ data: {} }, {}), true);
+
+  process.env.PLAYWRIGHT_HEADLESS = "false";
+  assert.equal(resolvePlaywrightHeadless({ data: {} }, {}), false);
 });

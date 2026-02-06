@@ -31,6 +31,10 @@ type ExecutionContext = {
   __validationCache?: Record<string, boolean>;
 };
 
+type ExecutionDefaults = {
+  playwrightHeadless?: boolean;
+};
+
 class ApprovalRequiredError extends Error {
   nodeId: string;
 
@@ -147,6 +151,7 @@ export async function startRun(prisma: PrismaClient, runId: string) {
             prisma,
             node,
             context,
+            executionDefaults: definition?.execution,
             retryCount,
             timeoutMs,
             browser,
@@ -265,6 +270,7 @@ async function runNodeWithRetry(args: {
   prisma: PrismaClient;
   node: any;
   context: ExecutionContext;
+  executionDefaults?: ExecutionDefaults;
   retryCount: number;
   timeoutMs: number;
   browser: Browser | null;
@@ -279,6 +285,7 @@ async function runNodeWithRetry(args: {
     prisma,
     node,
     context,
+    executionDefaults,
     retryCount,
     timeoutMs,
     browser: initialBrowser,
@@ -303,6 +310,7 @@ async function runNodeWithRetry(args: {
           prisma,
           node,
           context,
+          executionDefaults,
           browser: currentBrowser,
           page: currentPage,
           setBrowserAndPage: (b, p) => {
@@ -341,12 +349,13 @@ async function executeNode(args: {
   prisma: PrismaClient;
   node: any;
   context: ExecutionContext;
+  executionDefaults?: ExecutionDefaults;
   browser: Browser | null;
   page: Page | null;
   setBrowserAndPage: (browser: Browser | null, page: Page | null) => void;
   testMode: boolean;
 }): Promise<{ outputKey?: string }> {
-  const { prisma, node, context, browser, page, setBrowserAndPage, testMode } = args;
+  const { prisma, node, context, executionDefaults, browser, page, setBrowserAndPage, testMode } = args;
   const nodeTypeValue = nodeType(node);
 
   switch (nodeTypeValue) {
@@ -404,27 +413,31 @@ async function executeNode(args: {
       throw new ApprovalRequiredError(node.id, node.data?.message || "Manual approval required");
     }
     case "playwright_navigate": {
-      const ensured = await ensurePage(browser, page);
+      const headless = resolvePlaywrightHeadless(node, executionDefaults);
+      const ensured = await ensurePage(browser, page, headless);
       setBrowserAndPage(ensured.browser, ensured.page);
       const url = await interpolateWithSecrets(node.data?.url, context, prisma);
       await ensured.page.goto(String(url));
       return {};
     }
     case "playwright_click": {
-      const ensured = await ensurePage(browser, page);
+      const headless = resolvePlaywrightHeadless(node, executionDefaults);
+      const ensured = await ensurePage(browser, page, headless);
       setBrowserAndPage(ensured.browser, ensured.page);
       await clickWithSelectorStrategies(ensured.page, node.data);
       return {};
     }
     case "playwright_fill": {
-      const ensured = await ensurePage(browser, page);
+      const headless = resolvePlaywrightHeadless(node, executionDefaults);
+      const ensured = await ensurePage(browser, page, headless);
       setBrowserAndPage(ensured.browser, ensured.page);
       const value = String(await interpolateWithSecrets(node.data?.value, context, prisma));
       await fillWithSelectorStrategies(ensured.page, node.data, value);
       return {};
     }
     case "playwright_extract": {
-      const ensured = await ensurePage(browser, page);
+      const headless = resolvePlaywrightHeadless(node, executionDefaults);
+      const ensured = await ensurePage(browser, page, headless);
       setBrowserAndPage(ensured.browser, ensured.page);
       const saveAs = String(node.data?.saveAs || "extracted_text");
       const value = await extractWithSelectorStrategies(ensured.page, node.data);
@@ -529,13 +542,26 @@ async function runDesktop(type: string, data: any, context: ExecutionContext, pr
   }
 }
 
-async function ensurePage(browser: Browser | null, page: Page | null) {
-  if (!browser) browser = await chromium.launch({ headless: false });
+async function ensurePage(browser: Browser | null, page: Page | null, headless: boolean) {
+  if (!browser) browser = await chromium.launch({ headless });
   if (!page) {
     const context = await browser.newContext();
     page = await context.newPage();
   }
   return { browser, page };
+}
+
+function envPlaywrightHeadlessDefault() {
+  const raw = String(process.env.PLAYWRIGHT_HEADLESS ?? "true").toLowerCase().trim();
+  return !(raw === "0" || raw === "false" || raw === "no");
+}
+
+export function resolvePlaywrightHeadless(node: any, executionDefaults?: ExecutionDefaults) {
+  if (typeof node?.data?.headless === "boolean") return node.data.headless;
+  if (typeof executionDefaults?.playwrightHeadless === "boolean") {
+    return executionDefaults.playwrightHeadless;
+  }
+  return envPlaywrightHeadlessDefault();
 }
 
 async function clickWithSelectorStrategies(page: Page, data: any) {

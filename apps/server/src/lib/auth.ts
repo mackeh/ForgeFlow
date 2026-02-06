@@ -22,7 +22,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   try {
     jwt.verify(token, jwtSecret);
     next();
-  } catch {
+  } catch (err) {
     res.status(401).json({ error: "Invalid token" });
   }
 }
@@ -67,4 +67,8 @@ function registerFailure(username: string) {
   const count = prev.count + 1;
   const lockUntil = count >= maxAttempts ? now + lockMs : 0;
   failedAttempts.set(username, { count, lockUntil });
+}
+
+export function resetAuthStateForTests() {
+  failedAttempts.clear();
 }

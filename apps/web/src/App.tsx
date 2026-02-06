@@ -24,6 +24,7 @@ import {
   login,
   publishWorkflow,
   rollbackWorkflow,
+  runPreflight,
   saveSecret,
   startDesktopRecorder,
   startRecorder,
@@ -71,6 +72,7 @@ export default function App() {
   const [secrets, setSecrets] = useState<any[]>([]);
   const [secretKey, setSecretKey] = useState("");
   const [secretValue, setSecretValue] = useState("");
+  const [workflowName, setWorkflowName] = useState("");
 
   const nodesRef = useRef<Node[]>(nodes);
 
@@ -105,6 +107,21 @@ export default function App() {
       .then(setSecrets)
       .catch((err) => setStatus(err.message));
   }, [token]);
+
+  useEffect(() => {
+    setWorkflowName(activeWorkflow?.name || "");
+  }, [activeWorkflow?.id, activeWorkflow?.name]);
+
+  useEffect(() => {
+    if (!activeRun?.id) return;
+    if (!["PENDING", "RUNNING", "WAITING_APPROVAL"].includes(activeRun.status)) return;
+
+    const timer = setInterval(() => {
+      loadRun(activeRun.id).catch(() => undefined);
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [activeRun?.id, activeRun?.status]);
 
   async function refreshWorkflows() {
     const data = await getWorkflows();
@@ -162,7 +179,7 @@ export default function App() {
 
   const handleSave = async () => {
     if (!activeWorkflow) return null;
-    const definition = { ...defaultDefinition, nodes, edges };
+    const definition = buildCurrentDefinition();
     const updated = await updateWorkflow(activeWorkflow.id, { definition, notes: "Saved from UI" });
     setActiveWorkflow(updated);
     setWorkflowList((list) => list.map((item) => (item.id === updated.id ? updated : item)));
@@ -173,6 +190,12 @@ export default function App() {
   const runWorkflow = async (testMode = false, resumeFromRunId?: string) => {
     if (!activeWorkflow) return;
     await handleSave();
+    const preflight = await runPreflight({ definition: buildCurrentDefinition() });
+    if (!preflight.ready) {
+      const msg = preflight.messages?.join(" | ") || "Preflight failed";
+      setStatus(`Preflight blocked run: ${msg}`);
+      return;
+    }
     const run = await startRun(activeWorkflow.id, { testMode, resumeFromRunId });
     setStatus(testMode ? "Test run started" : "Run started");
     await refreshWorkflowMeta(activeWorkflow.id);
@@ -310,6 +333,24 @@ export default function App() {
     setStatus("Secret saved");
   };
 
+  const handleRenameWorkflow = async () => {
+    if (!activeWorkflow || !workflowName.trim()) return;
+    const updated = await updateWorkflow(activeWorkflow.id, { name: workflowName.trim() });
+    setActiveWorkflow(updated);
+    setWorkflowList((list) => list.map((item) => (item.id === updated.id ? updated : item)));
+    setStatus("Workflow renamed");
+  };
+
+  const buildCurrentDefinition = () => {
+    const existing = activeWorkflow?.draftDefinition || activeWorkflow?.definition || defaultDefinition;
+    return {
+      ...defaultDefinition,
+      ...existing,
+      nodes,
+      edges
+    };
+  };
+
   if (!token) {
     return (
       <div className="login">
@@ -347,6 +388,9 @@ export default function App() {
           handleCreateWorkflow().catch((err) => setStatus(err.message));
         }}
       >
+        <h3>Workflow</h3>
+        <input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="Workflow name" />
+        <button onClick={() => handleRenameWorkflow().catch((err) => setStatus(err.message))}>Rename</button>
         <h3>Versions</h3>
         <select
           value={rollbackVersion}

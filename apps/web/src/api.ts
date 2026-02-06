@@ -99,6 +99,13 @@ export function getRunDiff(runId: string) {
   return request(`/api/runs/${runId}/diff-last-success`);
 }
 
+export function runPreflight(payload: { workflowId?: string; definition?: any }) {
+  return request("/api/system/preflight", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function startRecorder(startUrl?: string) {
   return request("/api/recorders/web/start", {
     method: "POST",

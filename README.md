@@ -66,6 +66,7 @@ Detailed usage guide:
 - `GET /api/workflows/:id/versions`
 - `POST /api/workflows/:id/rollback`
 - `POST /api/runs/start`
+- `POST /api/system/preflight`
 - `GET /api/workflows/:id/runs`
 - `GET /api/runs/:id`
 - `POST /api/runs/:id/approve`
@@ -81,6 +82,7 @@ Detailed usage guide:
 - `APP_PASSWORD` (plain local dev)
 - `APP_PASSWORD_HASH_ARGON2` (preferred)
 - `SECRET_ENCRYPTION_KEY` for local secret encryption
+- `PLAYWRIGHT_HEADLESS=true` (recommended default for Docker)
 
 ## Tests
 - Server tests:

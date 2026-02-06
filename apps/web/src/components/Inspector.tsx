@@ -39,7 +39,14 @@ export function Inspector({ node, onUpdate }: { node: Node | null; onUpdate: any
           </>
         ) : null}
         <label>Data</label>
-        <textarea value={json} onChange={(e) => setJson(e.target.value)} rows={16} />
+        <textarea
+          value={json}
+          onChange={(e) => setJson(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
+          onKeyUp={(e) => e.stopPropagation()}
+          onFocus={(e) => e.currentTarget.select()}
+          rows={16}
+        />
         <button
           onClick={() => {
             try {
