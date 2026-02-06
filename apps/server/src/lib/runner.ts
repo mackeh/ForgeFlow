@@ -805,16 +805,28 @@ async function suggestSelector(page: Page, data: any) {
 
   const hints = await page
     .evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll("button,[role='button'],a"))
-        .slice(0, 6)
+      const buttons = Array.from(
+        document.querySelectorAll("button,[role='button'],a,input,textarea,select,[data-testid],[aria-label]")
+      )
+        .slice(0, 12)
         .map((el) => ({
           text: (el.textContent || "").trim(),
           testId: el.getAttribute("data-testid"),
-          ariaLabel: el.getAttribute("aria-label")
+          ariaLabel: el.getAttribute("aria-label"),
+          id: el.getAttribute("id"),
+          role: el.getAttribute("role"),
+          tag: el.tagName.toLowerCase()
         }));
       return buttons;
     })
     .catch(() => []);
+
+  if (selectorAiEnabled()) {
+    const aiSelectors = await requestSelectorSuggestionsFromLlm(data, hints).catch(() => []);
+    if (aiSelectors.length) {
+      return `Try selectors: ${aiSelectors.join(" | ")}`;
+    }
+  }
 
   const first = (hints || []).find((h: any) => h.testId || h.ariaLabel || h.text);
   if (!first) return "";
@@ -823,6 +835,102 @@ async function suggestSelector(page: Page, data: any) {
   if (first.ariaLabel) return `[aria-label=\"${first.ariaLabel}\"]`;
   if (first.text) return `text=${first.text}`;
   return "";
+}
+
+function selectorAiEnabled() {
+  const raw = String(process.env.SELECTOR_AI_ENABLED ?? "true").toLowerCase().trim();
+  return !(raw === "0" || raw === "false" || raw === "no");
+}
+
+async function requestSelectorSuggestionsFromLlm(data: any, hints: Array<Record<string, unknown>>) {
+  const model = String(data?.selectorModel || process.env.SELECTOR_AI_MODEL || "llama3.2");
+  const prompt = buildSelectorAiPrompt(data, hints);
+  const response = await fetch(`${ollamaBaseUrl}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      prompt,
+      stream: false
+    }),
+    signal: AbortSignal.timeout(2500)
+  });
+  if (!response.ok) {
+    throw new Error(`Selector AI request failed: ${response.status}`);
+  }
+  const body = await response.json();
+  const rawText = String(body.response || body.output || "");
+  return extractSelectorsFromAiResponse(rawText);
+}
+
+export function buildSelectorAiPrompt(data: any, hints: Array<Record<string, unknown>>) {
+  const requestedAction = data?.value !== undefined ? "fill input field" : "click/locate element";
+  const requestedSelector = String(data?.selector || data?.textHint || "");
+  const sanitizedHints = (hints || []).slice(0, 10);
+  return [
+    "You are a browser automation selector expert.",
+    `Goal: provide resilient selector candidates for this action: ${requestedAction}.`,
+    requestedSelector ? `Current failing selector: ${requestedSelector}` : "No current selector available.",
+    "Return ONLY JSON with this shape: {\"selectors\": [\"...\", \"...\"]}.",
+    "Prefer data-testid, aria-label, role+name, and stable attributes. Avoid nth-child when possible.",
+    "DOM hints:",
+    JSON.stringify(sanitizedHints)
+  ].join("\n");
+}
+
+export function extractSelectorsFromAiResponse(raw: string) {
+  const fromJson = extractSelectorsFromJson(raw);
+  if (fromJson.length) return fromJson;
+
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*]\s+/, ""))
+    .filter(Boolean);
+
+  return normalizeSelectors(lines);
+}
+
+function extractSelectorsFromJson(raw: string) {
+  try {
+    const parsed = parseJsonOutput(raw);
+    if (Array.isArray(parsed)) {
+      return normalizeSelectors(parsed);
+    }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const value = (parsed as Record<string, unknown>).selectors;
+      if (Array.isArray(value)) {
+        return normalizeSelectors(value);
+      }
+    }
+  } catch {
+    // ignore parse errors and fall back to line parsing
+  }
+  return [];
+}
+
+function normalizeSelectors(values: unknown[]) {
+  const selectors = Array.from(
+    new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .map((value) => value.replace(/^selectors?\s*:\s*/i, ""))
+        .filter((value) =>
+          value.startsWith("#") ||
+          value.startsWith(".") ||
+          value.startsWith("[") ||
+          value.startsWith("//") ||
+          value.startsWith("xpath=") ||
+          value.startsWith("text=") ||
+          value.includes("[data-testid") ||
+          value.includes("[aria-label") ||
+          value.includes("button") ||
+          value.includes("input")
+        )
+    )
+  );
+  return selectors.slice(0, 6);
 }
 
 async function resolveTemplateObject(value: any, context: ExecutionContext, prisma: PrismaClient): Promise<any> {

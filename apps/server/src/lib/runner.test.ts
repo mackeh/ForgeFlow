@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSelectorCandidates, evaluateCondition, orderNodes, resolvePlaywrightHeadless } from "./runner.js";
+import {
+  buildSelectorAiPrompt,
+  buildSelectorCandidates,
+  evaluateCondition,
+  extractSelectorsFromAiResponse,
+  orderNodes,
+  resolvePlaywrightHeadless
+} from "./runner.js";
 
 test("orderNodes returns all nodes even with cycle", () => {
   const definition = {
@@ -52,4 +59,30 @@ test("evaluateCondition supports branch operators", () => {
   assert.equal(evaluateCondition(5, 5, "eq"), true);
   assert.equal(evaluateCondition("abc", "b", "contains"), true);
   assert.equal(evaluateCondition("x", ["a", "x"], "in"), true);
+});
+
+test("extractSelectorsFromAiResponse parses JSON payload", () => {
+  const raw = JSON.stringify({
+    selectors: ["#submit", "[data-testid='send-btn']", "text=Submit"]
+  });
+  const selectors = extractSelectorsFromAiResponse(raw);
+  assert.equal(selectors.includes("#submit"), true);
+  assert.equal(selectors.includes("text=Submit"), true);
+});
+
+test("extractSelectorsFromAiResponse parses line-based fallback", () => {
+  const raw = ["- button.primary", "- [aria-label='Save']", "- text=Save"].join("\n");
+  const selectors = extractSelectorsFromAiResponse(raw);
+  assert.equal(selectors.some((value) => value.includes("button.primary")), true);
+  assert.equal(selectors.some((value) => value.includes("[aria-label='Save']")), true);
+});
+
+test("buildSelectorAiPrompt includes action context and hints", () => {
+  const prompt = buildSelectorAiPrompt(
+    { selector: "button.btn-primary", value: "hello" },
+    [{ text: "Save", testId: "save-btn", tag: "button" }]
+  );
+  assert.equal(prompt.includes("button.btn-primary"), true);
+  assert.equal(prompt.includes("save-btn"), true);
+  assert.equal(prompt.includes("Return ONLY JSON"), true);
 });
