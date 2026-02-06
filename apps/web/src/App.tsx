@@ -39,6 +39,8 @@ import { Sidebar } from "./components/Sidebar";
 import { Inspector } from "./components/Inspector";
 
 const nodeTypes = { action: ActionNode };
+type ToastLevel = "info" | "success" | "error";
+type Toast = { id: number; message: string; level: ToastLevel };
 
 const defaultDefinition = {
   nodes: [
@@ -75,9 +77,12 @@ export default function App() {
   const [secretKey, setSecretKey] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [workflowName, setWorkflowName] = useState("");
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [snapToGrid, setSnapToGrid] = useState(true);
 
   const nodesRef = useRef<Node[]>(nodes);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const toastIdRef = useRef(1);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -105,10 +110,10 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    refreshWorkflows().catch((err) => setStatus(err.message));
+    refreshWorkflows().catch(showError);
     getSecrets()
       .then(setSecrets)
-      .catch((err) => setStatus(err.message));
+      .catch(showError);
   }, [token]);
 
   useEffect(() => {
@@ -125,6 +130,24 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [activeRun?.id, activeRun?.status]);
+
+  const pushToast = (message: string, level: ToastLevel = "info") => {
+    const id = toastIdRef.current++;
+    setToasts((prev) => [...prev, { id, message, level }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 3500);
+  };
+
+  const setFeedback = (message: string, level: ToastLevel = "info") => {
+    setStatus(message);
+    pushToast(message, level);
+  };
+
+  const showError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || "Unknown error");
+    setFeedback(message, "error");
+  };
 
   async function refreshWorkflows(forceSelectFirst = false) {
     const data = await getWorkflows();
@@ -168,8 +191,9 @@ export default function App() {
     try {
       await login(username, password);
       setToken(localStorage.getItem("token"));
+      setFeedback("Signed in", "success");
     } catch (err: any) {
-      setStatus(err.message);
+      showError(err);
     }
   };
 
@@ -178,6 +202,7 @@ export default function App() {
     const created = await createWorkflow({ name, definition: defaultDefinition });
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
+    setFeedback("Workflow created", "success");
   };
 
   const handleLogout = () => {
@@ -201,21 +226,28 @@ export default function App() {
     const updated = await updateWorkflow(activeWorkflow.id, { definition, notes: "Saved from UI" });
     setActiveWorkflow(updated);
     setWorkflowList((list) => list.map((item) => (item.id === updated.id ? updated : item)));
-    setStatus("Draft saved");
+    setFeedback("Draft saved", "success");
     return updated;
   };
 
   const runWorkflow = async (testMode = false, resumeFromRunId?: string) => {
     if (!activeWorkflow) return;
+    const definition = buildCurrentDefinition();
+    const validationErrors = validateWorkflowDefinition(definition);
+    if (validationErrors.length) {
+      const message = `Validation failed: ${validationErrors[0]}`;
+      setFeedback(message, "error");
+      return;
+    }
     await handleSave();
-    const preflight = await runPreflight({ definition: buildCurrentDefinition() });
+    const preflight = await runPreflight({ definition });
     if (!preflight.ready) {
       const msg = preflight.messages?.join(" | ") || "Preflight failed";
-      setStatus(`Preflight blocked run: ${msg}`);
+      setFeedback(`Preflight blocked run: ${msg}`, "error");
       return;
     }
     const run = await startRun(activeWorkflow.id, { testMode, resumeFromRunId });
-    setStatus(testMode ? "Test run started" : "Run started");
+    setFeedback(testMode ? "Test run started" : "Run started", "success");
     await refreshWorkflowMeta(activeWorkflow.id);
     await loadRun(run.id);
   };
@@ -224,7 +256,7 @@ export default function App() {
     if (!activeWorkflow) return;
     await handleSave();
     await publishWorkflow(activeWorkflow.id, "Published from UI");
-    setStatus("Published");
+    setFeedback("Published", "success");
     await refreshWorkflowMeta(activeWorkflow.id);
     await refreshWorkflows();
   };
@@ -232,11 +264,64 @@ export default function App() {
   const handleRollback = async () => {
     if (!activeWorkflow || rollbackVersion === "") return;
     await rollbackWorkflow(activeWorkflow.id, Number(rollbackVersion));
-    setStatus(`Rolled back to version ${rollbackVersion}`);
+    setFeedback(`Rolled back to version ${rollbackVersion}`, "success");
     await refreshWorkflows();
     const latest = await getWorkflows();
     const wf = latest.find((x: any) => x.id === activeWorkflow.id);
     if (wf) await selectWorkflow(wf);
+  };
+
+  const findNextNodePosition = (existingNodes: Node[]) => {
+    const baseX = 80;
+    const baseY = 80;
+    const gapX = 250;
+    const gapY = 140;
+    const maxCols = 4;
+    const occupied = new Set(
+      existingNodes.map((node) => {
+        const col = Math.max(0, Math.round((node.position.x - baseX) / gapX));
+        const row = Math.max(0, Math.round((node.position.y - baseY) / gapY));
+        return `${col}:${row}`;
+      })
+    );
+    for (let i = 0; i < 500; i += 1) {
+      const col = i % maxCols;
+      const row = Math.floor(i / maxCols);
+      const key = `${col}:${row}`;
+      if (!occupied.has(key)) {
+        return { x: baseX + col * gapX, y: baseY + row * gapY };
+      }
+    }
+    return { x: baseX, y: baseY };
+  };
+
+  const autoLayoutNodes = () => {
+    const baseX = 80;
+    const baseY = 80;
+    const gapX = 250;
+    const gapY = 140;
+    const maxCols = 4;
+    const sorted = [...nodesRef.current].sort((a, b) => {
+      const aStart = String(a.data?.type || "") === "start" ? 0 : 1;
+      const bStart = String(b.data?.type || "") === "start" ? 0 : 1;
+      if (aStart !== bStart) return aStart - bStart;
+      return a.id.localeCompare(b.id);
+    });
+
+    const relayoutMap = new Map<string, { x: number; y: number }>();
+    sorted.forEach((node, idx) => {
+      const col = idx % maxCols;
+      const row = Math.floor(idx / maxCols);
+      relayoutMap.set(node.id, { x: baseX + col * gapX, y: baseY + row * gapY });
+    });
+
+    setNodes((current) =>
+      current.map((node) => {
+        const position = relayoutMap.get(node.id);
+        return position ? { ...node, position } : node;
+      })
+    );
+    setFeedback("Auto layout complete", "success");
   };
 
   const handleAddNode = (type: string, dataOverrides: Record<string, any> = {}): string => {
@@ -245,7 +330,7 @@ export default function App() {
     const newNode: Node = {
       id,
       type: "action",
-      position: { x: 120 + nodesRef.current.length * 20, y: 120 + nodesRef.current.length * 40 },
+      position: findNextNodePosition(nodesRef.current),
       data: { label: type.replace(/_/g, " "), type, ...dataOverrides }
     };
     nodesRef.current = [...nodesRef.current, newNode];
@@ -258,8 +343,91 @@ export default function App() {
     return id;
   };
 
+  const validateWorkflowDefinition = (definition: any) => {
+    const validationErrors: string[] = [];
+    const allNodes = Array.isArray(definition?.nodes) ? definition.nodes : [];
+    const allEdges = Array.isArray(definition?.edges) ? definition.edges : [];
+    const startNode = allNodes.find((node: any) => String(node?.data?.type || node?.type || "") === "start");
+
+    if (!startNode) {
+      validationErrors.push("Workflow is missing a Start node.");
+    }
+
+    const outgoing = new Map<string, string[]>();
+    allEdges.forEach((edge: any) => {
+      const source = String(edge?.source || "");
+      const target = String(edge?.target || "");
+      if (!source || !target) return;
+      const list = outgoing.get(source) || [];
+      list.push(target);
+      outgoing.set(source, list);
+    });
+
+    if (startNode) {
+      const visited = new Set<string>();
+      const queue = [startNode.id];
+      while (queue.length) {
+        const current = queue.shift();
+        if (!current || visited.has(current)) continue;
+        visited.add(current);
+        const next = outgoing.get(current) || [];
+        next.forEach((nodeId) => {
+          if (!visited.has(nodeId)) queue.push(nodeId);
+        });
+      }
+      allNodes.forEach((node: any) => {
+        const type = String(node?.data?.type || "");
+        if (type === "start") return;
+        if (!visited.has(node.id)) {
+          validationErrors.push(`Node "${node.data?.label || node.id}" is disconnected from Start.`);
+        }
+      });
+    }
+
+    const requiredNodeFields: Record<string, string[]> = {
+      set_variable: ["key"],
+      http_request: ["url"],
+      transform_llm: ["inputKey", "outputKey"],
+      validate_record: ["inputKey"],
+      submit_guard: ["inputKey"],
+      playwright_navigate: ["url"],
+      playwright_click: ["selector"],
+      playwright_fill: ["selector", "value"],
+      playwright_extract: ["selector", "saveAs"],
+      desktop_type: ["value"],
+      desktop_click_image: ["imagePath"],
+      desktop_wait_for_image: ["imagePath"]
+    };
+
+    allNodes.forEach((node: any) => {
+      const nodeType = String(node?.data?.type || "");
+      const fields = requiredNodeFields[nodeType] || [];
+      fields.forEach((field) => {
+        const value = node?.data?.[field];
+        if (value === undefined || value === null || String(value).trim() === "") {
+          validationErrors.push(`Node "${node.data?.label || node.id}" is missing "${field}".`);
+        }
+      });
+    });
+
+    const secretRegex = /\{\{secret:([A-Za-z0-9_\-:.]+)\}\}/g;
+    const secretKeys = new Set(secrets.map((item) => String(item.key || "")));
+    allNodes.forEach((node: any) => {
+      const serialized = JSON.stringify(node?.data || {});
+      const matches = serialized.matchAll(secretRegex);
+      for (const match of matches) {
+        const key = match[1];
+        if (!secretKeys.has(key)) {
+          validationErrors.push(`Node "${node.data?.label || node.id}" references missing secret "${key}".`);
+        }
+      }
+    });
+
+    return validationErrors;
+  };
+
   const handleStartRecorder = async () => {
-    setStatus("Starting recorder...");
+    setFeedback("Starting recorder...", "info");
     const session = await startRecorder();
     const ws = new WebSocket(`${API_URL.replace("http", "ws")}${session.wsUrl}`);
 
@@ -281,21 +449,21 @@ export default function App() {
       }
     };
 
-    ws.onopen = () => setStatus("Recorder connected");
-    ws.onerror = () => setStatus("Recorder error");
+    ws.onopen = () => setFeedback("Recorder connected", "success");
+    ws.onerror = () => setFeedback("Recorder error", "error");
   };
 
   const handleDesktopRecordStart = async () => {
-    setStatus("Starting desktop recorder...");
+    setFeedback("Starting desktop recorder...", "info");
     await startDesktopRecorder("session");
     setDesktopRecording(true);
-    setStatus("Desktop recording active");
+    setFeedback("Desktop recording active", "success");
   };
 
   const handleDesktopRecordStop = async () => {
     const result = await stopDesktopRecorder();
     setDesktopRecording(false);
-    setStatus("Desktop recording stopped");
+    setFeedback("Desktop recording stopped", "success");
     const events = result.events || [];
     events.forEach((event: any) => {
       if (event.type === "desktop_click_image") {
@@ -331,11 +499,11 @@ export default function App() {
     const waitingNode = getWaitingApprovalNodeId(activeRun);
     const nodeId = waitingNode || selectedNode?.id;
     if (!nodeId) {
-      setStatus("No waiting approval node found");
+      setFeedback("No waiting approval node found", "error");
       return;
     }
     await approveRun(activeRun.id, nodeId, true);
-    setStatus(`Approved node ${nodeId}`);
+    setFeedback(`Approved node ${nodeId}`, "success");
     if (activeWorkflow) {
       await refreshWorkflowMeta(activeWorkflow.id);
     }
@@ -348,7 +516,7 @@ export default function App() {
     setSecretValue("");
     const list = await getSecrets();
     setSecrets(list);
-    setStatus("Secret saved");
+    setFeedback("Secret saved", "success");
   };
 
   const handleRenameWorkflow = async () => {
@@ -356,7 +524,7 @@ export default function App() {
     const updated = await updateWorkflow(activeWorkflow.id, { name: workflowName.trim() });
     setActiveWorkflow(updated);
     setWorkflowList((list) => list.map((item) => (item.id === updated.id ? updated : item)));
-    setStatus("Workflow renamed");
+    setFeedback("Workflow renamed", "success");
   };
 
   const handleDeleteWorkflow = async () => {
@@ -373,12 +541,12 @@ export default function App() {
     setVersions([]);
     setRollbackVersion("");
     await refreshWorkflows(true);
-    setStatus("Workflow deleted");
+    setFeedback("Workflow deleted", "success");
   };
 
   const handleSaveWorkflowFile = () => {
     if (!activeWorkflow) {
-      setStatus("Select a workflow first");
+      setFeedback("Select a workflow first", "error");
       return;
     }
     const payload = {
@@ -395,7 +563,7 @@ export default function App() {
     a.download = `${safeName}.workflow.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setStatus(`Workflow exported: ${a.download}`);
+    setFeedback(`Workflow exported: ${a.download}`, "success");
   };
 
   const handleLoadWorkflowClick = () => {
@@ -419,7 +587,7 @@ export default function App() {
     const created = await createWorkflow({ name: importedName, definition });
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
-    setStatus(`Workflow loaded from ${file.name}`);
+    setFeedback(`Workflow loaded from ${file.name}`, "success");
   };
 
   const buildCurrentDefinition = () => {
@@ -463,18 +631,18 @@ export default function App() {
         workflows={workflowList}
         activeId={activeWorkflow?.id}
         onSelect={(wf: any) => {
-          selectWorkflow(wf).catch((err) => setStatus(err.message));
+          selectWorkflow(wf).catch(showError);
         }}
         onCreate={() => {
-          handleCreateWorkflow().catch((err) => setStatus(err.message));
+          handleCreateWorkflow().catch(showError);
         }}
       >
         <h3>Workflow</h3>
         <input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="Workflow name" />
-        <button onClick={() => handleRenameWorkflow().catch((err) => setStatus(err.message))}>Rename</button>
+        <button onClick={() => handleRenameWorkflow().catch(showError)}>Rename</button>
         <button onClick={handleSaveWorkflowFile}>Save Workflow File</button>
         <button onClick={() => handleLoadWorkflowClick()}>Load Workflow File</button>
-        <button className="danger" onClick={() => handleDeleteWorkflow().catch((err) => setStatus(err.message))}>
+        <button className="danger" onClick={() => handleDeleteWorkflow().catch(showError)}>
           Delete Workflow
         </button>
         <button className="secondary" onClick={handleLogout}>
@@ -492,7 +660,7 @@ export default function App() {
             </option>
           ))}
         </select>
-        <button onClick={() => handleRollback().catch((err) => setStatus(err.message))}>Rollback</button>
+        <button onClick={() => handleRollback().catch(showError)}>Rollback</button>
         <h3>Secrets</h3>
         <input placeholder="Secret key" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} />
         <input
@@ -501,7 +669,7 @@ export default function App() {
           value={secretValue}
           onChange={(e) => setSecretValue(e.target.value)}
         />
-        <button onClick={() => handleSaveSecret().catch((err) => setStatus(err.message))}>Save Secret</button>
+        <button onClick={() => handleSaveSecret().catch(showError)}>Save Secret</button>
         <small>{secrets.length} stored secret keys</small>
       </Sidebar>
 
@@ -511,7 +679,7 @@ export default function App() {
           type="file"
           accept=".json,.workflow.json,application/json"
           style={{ display: "none" }}
-          onChange={(event) => handleLoadWorkflowFile(event).catch((err) => setStatus(err.message))}
+          onChange={(event) => handleLoadWorkflowFile(event).catch(showError)}
         />
         <div className="toolbar">
           <div className="toolbar-left">
@@ -522,20 +690,20 @@ export default function App() {
             ))}
           </div>
           <div className="toolbar-right">
-            <button onClick={() => handleStartRecorder().catch((err) => setStatus(err.message))}>Record Web</button>
+            <button onClick={() => handleStartRecorder().catch(showError)}>Record Web</button>
             <button
               onClick={() =>
-                (desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()).catch((err) =>
-                  setStatus(err.message)
-                )
+                (desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()).catch(showError)
               }
             >
               {desktopRecording ? "Stop Desktop" : "Record Desktop"}
             </button>
-            <button onClick={() => handleSave().catch((err) => setStatus(err.message))}>Save Draft</button>
-            <button onClick={() => handlePublish().catch((err) => setStatus(err.message))}>Publish</button>
-            <button onClick={() => runWorkflow(true).catch((err) => setStatus(err.message))}>Test Run</button>
-            <button className="primary" onClick={() => runWorkflow(false).catch((err) => setStatus(err.message))}>
+            <button onClick={autoLayoutNodes}>Auto Layout</button>
+            <button onClick={() => setSnapToGrid((value) => !value)}>{snapToGrid ? "Snap: On" : "Snap: Off"}</button>
+            <button onClick={() => handleSave().catch(showError)}>Save Draft</button>
+            <button onClick={() => handlePublish().catch(showError)}>Publish</button>
+            <button onClick={() => runWorkflow(true).catch(showError)}>Test Run</button>
+            <button className="primary" onClick={() => runWorkflow(false).catch(showError)}>
               Run
             </button>
           </div>
@@ -549,6 +717,8 @@ export default function App() {
           onConnect={onConnect}
           onNodeClick={(_, node) => setSelectedNode(node)}
           nodeTypes={nodeTypes}
+          snapToGrid={snapToGrid}
+          snapGrid={[20, 20]}
           fitView
         >
           <Background gap={20} />
@@ -563,19 +733,19 @@ export default function App() {
               <button
                 key={run.id}
                 className={activeRun?.id === run.id ? "run-item active" : "run-item"}
-                onClick={() => loadRun(run.id).catch((err) => setStatus(err.message))}
+                onClick={() => loadRun(run.id).catch(showError)}
               >
                 <div>{run.status}</div>
                 <small>{new Date(run.createdAt).toLocaleString()}</small>
               </button>
             ))}
             {activeRun?.status === "FAILED" ? (
-              <button onClick={() => runWorkflow(false, activeRun.id).catch((err) => setStatus(err.message))}>
+              <button onClick={() => runWorkflow(false, activeRun.id).catch(showError)}>
                 Resume From Failed Run
               </button>
             ) : null}
             {activeRun?.status === "WAITING_APPROVAL" ? (
-              <button onClick={() => handleApprove().catch((err) => setStatus(err.message))}>Approve Waiting Node</button>
+              <button onClick={() => handleApprove().catch(showError)}>Approve Waiting Node</button>
             ) : null}
           </div>
           <div className="run-diff">
@@ -599,6 +769,13 @@ export default function App() {
         </div>
 
         <div className="status-bar">{status || "Ready"}</div>
+        <div className="toast-stack">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`toast toast-${toast.level}`}>
+              {toast.message}
+            </div>
+          ))}
+        </div>
       </div>
 
       <Inspector node={selectedNode} onUpdate={setNodes} />

@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
@@ -18,14 +19,38 @@ import {
 import { listSecrets, upsertSecret } from "./lib/secrets.js";
 import { preflightForDefinition, preflightForWorkflowId } from "./lib/preflight.js";
 import { diffRunNodeStates } from "./lib/runDiff.js";
+import { loadRateLimitConfig } from "./lib/rateLimit.js";
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 const prisma = new PrismaClient();
+const rateLimitConfig = loadRateLimitConfig();
 
 app.use(cors());
 app.use(express.json({ limit: "8mb" }));
+
+if (rateLimitConfig.trustProxy) {
+  app.set("trust proxy", 1);
+}
+
+const apiLimiter = rateLimit({
+  windowMs: rateLimitConfig.windowMs,
+  limit: rateLimitConfig.maxRequests,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many requests. Try again later." }
+});
+
+const loginLimiter = rateLimit({
+  windowMs: rateLimitConfig.windowMs,
+  limit: rateLimitConfig.loginMaxRequests,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Try again later." }
+});
+
+app.use("/api", apiLimiter);
 
 attachRecorderWs(wss);
 
@@ -36,7 +61,7 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", loginLimiter, async (req, res) => {
   const schema = z.object({ username: z.string(), password: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {

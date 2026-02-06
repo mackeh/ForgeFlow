@@ -34,8 +34,13 @@ Default values (if unchanged):
 
 1. Click `New` in the left sidebar.
 2. Add nodes from the top toolbar (`+ HTTP Request`, `+ Web Navigate`, etc.).
-3. Select a node and edit JSON in the right `Inspector`.
+3. Select a node and use `Quick Edit` fields in the right `Inspector` for common settings.
+4. Use JSON in the inspector for advanced settings.
 4. Click `Save Draft`.
+
+Tips:
+- Use `Auto Layout` in the toolbar to re-arrange overlapping nodes.
+- Toggle `Snap: On/Off` for grid snapping while dragging.
 
 ### Recommended first node chain
 
@@ -116,6 +121,12 @@ Start without auto-update:
 
 ```bash
 AUTO_UPDATE=0 ./start.sh
+```
+
+Tune API rate limits (optional):
+
+```bash
+RATE_LIMIT_WINDOW_MS=900000 RATE_LIMIT_MAX=300 RATE_LIMIT_LOGIN_MAX=25 ./start.sh
 ```
 
 Stop all services:

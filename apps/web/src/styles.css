@@ -176,6 +176,38 @@ body {
   border-top: 1px solid var(--border);
 }
 
+.toast-stack {
+  position: absolute;
+  right: 16px;
+  bottom: 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 30;
+  max-width: 420px;
+}
+
+.toast {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  box-shadow: var(--shadow);
+  background: rgba(18, 27, 35, 0.95);
+}
+
+.toast-success {
+  border-color: rgba(44, 185, 176, 0.5);
+}
+
+.toast-error {
+  border-color: rgba(214, 78, 58, 0.65);
+}
+
+.toast-info {
+  border-color: rgba(245, 139, 31, 0.55);
+}
+
 .run-drawer {
   position: absolute;
   left: 0;
@@ -234,6 +266,33 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.inspector-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-field span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.inspector-field input,
+.inspector-field select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-family: "Archivo", sans-serif;
 }
 
 .inspector label {

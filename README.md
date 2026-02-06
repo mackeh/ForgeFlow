@@ -87,6 +87,10 @@ Detailed usage guide:
 - `APP_PASSWORD_HASH_ARGON2` (preferred)
 - `SECRET_ENCRYPTION_KEY` for local secret encryption
 - `PLAYWRIGHT_HEADLESS=true` (recommended default for Docker)
+- `RATE_LIMIT_WINDOW_MS` API rate-limit window in ms (default `900000`)
+- `RATE_LIMIT_MAX` max API requests per window (default `300`)
+- `RATE_LIMIT_LOGIN_MAX` max login attempts per window (default `25`)
+- `TRUST_PROXY=true` if running behind reverse proxy
 
 ## Tests
 - Server tests:
