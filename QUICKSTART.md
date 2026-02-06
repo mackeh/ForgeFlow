@@ -2,6 +2,13 @@
 
 This guide gets a single-user local setup running fast and shows the main workflow path.
 
+Additional technical docs:
+- `docs/README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `docs/DEPLOYMENT.md`
+- `docs/CONTRIBUTING.md`
+
 ## 1. Start the platform
 
 From project root:

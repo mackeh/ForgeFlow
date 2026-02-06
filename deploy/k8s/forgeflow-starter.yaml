@@ -1,0 +1,362 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forgeflow
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forgeflow-config
+  namespace: forgeflow
+data:
+  PORT: "8080"
+  DISPLAY: ":0"
+  PLAYWRIGHT_HEADLESS: "true"
+  RATE_LIMIT_WINDOW_MS: "900000"
+  RATE_LIMIT_MAX: "300"
+  RATE_LIMIT_LOGIN_MAX: "25"
+  TRUST_PROXY: "true"
+  LOG_LEVEL: "info"
+  REQUEST_LOGS: "1"
+  AUTHZ_FILE: "/app/data/authz.json"
+  WEBHOOKS_FILE: "/app/data/webhooks.json"
+  SCHEDULES_FILE: "/app/data/schedules.json"
+  AUDIT_FILE: "/app/data/audit.json"
+  AUDIT_MAX_EVENTS: "5000"
+  INTEGRATIONS_FILE: "/app/data/integrations.json"
+  COLLAB_FILE: "/app/data/collaboration.json"
+  SCHEDULE_DEFAULT_TIMEZONE: "UTC"
+  SELECTOR_AI_ENABLED: "true"
+  SELECTOR_AI_MODEL: "llama3.2"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  AGENT_BASE_URL: "http://agent:7001"
+  REDIS_URL: "redis://redis:6379"
+  DATABASE_URL: "postgresql://rpa:rpa@postgres:5432/rpa"
+  VITE_API_URL: "https://forgeflow.example.com"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: forgeflow-secrets
+  namespace: forgeflow
+type: Opaque
+stringData:
+  APP_USERNAME: "local"
+  APP_PASSWORD: "replace-this-password"
+  JWT_SECRET: "replace-this-jwt-secret"
+  SECRET_ENCRYPTION_KEY: "replace-this-secret-encryption-key"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: forgeflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: forgeflow
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: rpa
+            - name: POSTGRES_PASSWORD
+              value: rpa
+            - name: POSTGRES_DB
+              value: rpa
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: forgeflow
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: forgeflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: forgeflow
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama
+  namespace: forgeflow
+spec:
+  serviceName: ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+  volumeClaimTemplates:
+    - metadata:
+        name: ollama-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: forgeflow
+spec:
+  selector:
+    app: ollama
+  ports:
+    - port: 11434
+      targetPort: 11434
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: forgeflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/your-org/forgeflow-server:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: forgeflow-config
+            - secretRef:
+                name: forgeflow-secrets
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: forgeflow
+spec:
+  selector:
+    app: server
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: forgeflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/your-org/forgeflow-web:latest
+          ports:
+            - containerPort: 5173
+          envFrom:
+            - configMapRef:
+                name: forgeflow-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: forgeflow
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 5173
+      targetPort: 5173
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: forgeflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/your-org/forgeflow-agent:latest
+          ports:
+            - containerPort: 7001
+          envFrom:
+            - configMapRef:
+                name: forgeflow-config
+            - secretRef:
+                name: forgeflow-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+  namespace: forgeflow
+spec:
+  selector:
+    app: agent
+  ports:
+    - port: 7001
+      targetPort: 7001
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: forgeflow
+  namespace: forgeflow
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: forgeflow.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  number: 8080
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  number: 8080
+          - path: /ready
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  number: 8080
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 5173

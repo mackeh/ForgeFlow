@@ -86,6 +86,13 @@ Priority 3 (`Enterprise Features`) is implemented:
 
 For a full operator walkthrough, see `QUICKSTART.md`.
 
+## Documentation
+- Docs index: `docs/README.md`
+- Architecture: `docs/ARCHITECTURE.md`
+- API reference: `docs/API_REFERENCE.md`
+- Deployment guide (including Kubernetes starter manifests): `docs/DEPLOYMENT.md`
+- Contributing guide: `docs/CONTRIBUTING.md`
+
 ## Configuration
 Primary variables in `.env`:
 - `APP_USERNAME`, `APP_PASSWORD`
