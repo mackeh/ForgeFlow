@@ -87,21 +87,40 @@ Use secrets in node fields with:
 Example:
 - API header value: `Bearer {{secret:CRM_TOKEN}}`
 
-## 7. Handle approvals and failures
+## 7. Use templates, schedules, and dashboard
+
+- In `Templates`, pick a starter workflow and click `Create From Template`.
+- In `Schedules`, use a local-time cron expression (for example `0 9 * * *`) and click `Add Schedule`.
+- The metrics strip shows success rate, total runs, average duration, active schedules, and local server time.
+
+## 8. Handle approvals and failures
 
 - If a `manual_approval` node pauses execution, run status becomes `WAITING_APPROVAL`.
 - In run timeline, click `Approve Waiting Node` to continue.
 - If run fails, click `Resume From Failed Run` to continue from checkpoint.
 - Use `Diff vs Last Success` to compare behavior changes.
 
-## 8. Node types you should use often
+## 9. Multi-user, RBAC, and webhooks (admin)
+
+Admin users can manage:
+- `Users`: create/disable/delete local users and rotate roles.
+- `RBAC`: update role permission sets.
+- `Webhooks`: subscribe external endpoints to run events.
+
+Supported webhook events:
+- `run.started`
+- `run.succeeded`
+- `run.failed`
+- `run.waiting_approval`
+
+## 10. Node types you should use often
 
 - `validate_record`: required fields and regex checks
 - `submit_guard`: JSON schema check before submit
 - `transform_llm`: cleanup/normalize data via local Ollama model
 - `manual_approval`: stop and require user approval before critical actions
 
-## 9. Local LLM setup
+## 11. Local LLM setup
 
 Pull a model (once):
 
@@ -109,7 +128,7 @@ Pull a model (once):
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
 
-## 10. Useful maintenance commands
+## 12. Useful maintenance commands
 
 Rebuild and start:
 
@@ -141,7 +160,7 @@ View logs:
 docker compose logs -f
 ```
 
-## 11. Common troubleshooting
+## 13. Common troubleshooting
 
 ### Port conflict
 - Run `docker compose down` and retry.

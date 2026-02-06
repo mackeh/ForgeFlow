@@ -41,12 +41,27 @@ export async function login(username: string, password: string) {
   return data;
 }
 
+export function getCurrentUser() {
+  return request("/api/auth/me");
+}
+
 export function getWorkflows() {
   return request("/api/workflows");
 }
 
 export function createWorkflow(payload: { name: string; definition: any }) {
   return request("/api/workflows", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getTemplates() {
+  return request("/api/templates");
+}
+
+export function createWorkflowFromTemplate(payload: { templateId: string; name?: string }) {
+  return request("/api/workflows/from-template", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -107,6 +122,151 @@ export function approveRun(runId: string, nodeId: string, approved = true) {
 
 export function getRunDiff(runId: string) {
   return request(`/api/runs/${runId}/diff-last-success`);
+}
+
+export function getSchedules(workflowId?: string) {
+  const query = workflowId ? `?workflowId=${encodeURIComponent(workflowId)}` : "";
+  return request(`/api/schedules${query}`);
+}
+
+export function createSchedule(payload: {
+  workflowId: string;
+  name?: string;
+  cron: string;
+  timezone?: string;
+  enabled?: boolean;
+  testMode?: boolean;
+  inputData?: any;
+}) {
+  return request("/api/schedules", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateSchedule(id: string, payload: {
+  name?: string;
+  cron?: string;
+  timezone?: string;
+  enabled?: boolean;
+  testMode?: boolean;
+  inputData?: any;
+}) {
+  return request(`/api/schedules/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteSchedule(id: string) {
+  return request(`/api/schedules/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function runScheduleNow(id: string) {
+  return request(`/api/schedules/${id}/run-now`, {
+    method: "POST"
+  });
+}
+
+export function getDashboardMetrics(days = 7, timezone?: string) {
+  const q = new URLSearchParams({ days: String(days) });
+  if (timezone) q.set("timezone", timezone);
+  return request(`/api/metrics/dashboard?${q.toString()}`);
+}
+
+export function getSystemTime() {
+  return request("/api/system/time");
+}
+
+export function getAdminUsers() {
+  return request("/api/admin/users");
+}
+
+export function createAdminUser(payload: { username: string; password: string; role?: string; disabled?: boolean }) {
+  return request("/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateAdminUser(
+  username: string,
+  payload: { role?: string; password?: string; disabled?: boolean }
+) {
+  return request(`/api/admin/users/${encodeURIComponent(username)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteAdminUser(username: string) {
+  return request(`/api/admin/users/${encodeURIComponent(username)}`, {
+    method: "DELETE"
+  });
+}
+
+export function getRoles() {
+  return request("/api/admin/roles");
+}
+
+export function updateRole(role: string, permissions: string[]) {
+  return request(`/api/admin/roles/${encodeURIComponent(role)}`, {
+    method: "PUT",
+    body: JSON.stringify({ permissions })
+  });
+}
+
+export function getWebhooks() {
+  return request("/api/webhooks");
+}
+
+export function getWebhookEvents() {
+  return request("/api/webhooks/events");
+}
+
+export function createWebhook(payload: {
+  name: string;
+  url: string;
+  events: string[];
+  enabled?: boolean;
+  secret?: string;
+  headers?: Record<string, string>;
+}) {
+  return request("/api/webhooks", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateWebhook(
+  id: string,
+  payload: {
+    name?: string;
+    url?: string;
+    events?: string[];
+    enabled?: boolean;
+    secret?: string;
+    headers?: Record<string, string>;
+  }
+) {
+  return request(`/api/webhooks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteWebhook(id: string) {
+  return request(`/api/webhooks/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function testWebhook(id: string) {
+  return request(`/api/webhooks/${id}/test`, {
+    method: "POST"
+  });
 }
 
 export function runPreflight(payload: { workflowId?: string; definition?: any }) {

@@ -105,6 +105,66 @@ body {
   padding: 8px 10px;
 }
 
+.inline-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inline-option input {
+  margin: 0;
+}
+
+.schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.schedule-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.schedule-item small {
+  display: block;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.schedule-actions button {
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+.selected-events {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  background: rgba(44, 185, 176, 0.18);
+  border: 1px solid rgba(44, 185, 176, 0.5);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
 .sidebar-extra small {
   color: var(--muted);
 }
@@ -163,6 +223,57 @@ body {
   background: var(--accent);
   color: #111;
   border: none;
+}
+
+.metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(11, 17, 22, 0.8);
+}
+
+.metric-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.metric-card span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.metric-card strong {
+  font-size: 15px;
+}
+
+.metric-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.metric-controls select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 4px 6px;
+}
+
+.metric-controls button {
+  margin-top: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 .status-bar {
@@ -251,6 +362,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.top-failures {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
 }
 
 .inspector {
@@ -442,5 +560,9 @@ body {
   .sidebar,
   .inspector {
     border: none;
+  }
+
+  .metrics-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

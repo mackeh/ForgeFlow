@@ -9,6 +9,7 @@ import {
   validateRecord,
   validateWithSchema
 } from "./validation.js";
+import { dispatchWebhookEvent } from "./webhooks.js";
 
 const agentBaseUrl = process.env.AGENT_BASE_URL || "http://agent:7001";
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://ollama:11434";
@@ -87,6 +88,12 @@ export async function startRun(prisma: PrismaClient, runId: string) {
       logs: toJson(logs),
       artifacts: toJson(artifacts)
     }
+  });
+  void safeDispatchWebhook("run.started", {
+    runId: run.id,
+    workflowId: run.workflowId,
+    workflowVersion: run.workflowVersion,
+    testMode: run.testMode
   });
 
   const graph = buildGraph(nodes, edges);
@@ -203,6 +210,11 @@ export async function startRun(prisma: PrismaClient, runId: string) {
                 checkpointNodeId
               }
             });
+            void safeDispatchWebhook("run.waiting_approval", {
+              runId: run.id,
+              workflowId: run.workflowId,
+              nodeId: node.id
+            });
             return;
           }
 
@@ -254,6 +266,15 @@ export async function startRun(prisma: PrismaClient, runId: string) {
         artifacts: toJson(artifacts)
       }
     });
+    void safeDispatchWebhook(finalStatus === "SUCCEEDED" ? "run.succeeded" : "run.failed", {
+      runId: run.id,
+      workflowId: run.workflowId,
+      workflowVersion: run.workflowVersion,
+      status: finalStatus,
+      failedNodes: Object.entries(nodeStates)
+        .filter(([, state]) => state.status === "failed")
+        .map(([nodeId, state]) => ({ nodeId, error: state.error || "" }))
+    });
   } catch (error) {
     logs.push(logEvent("run", "run", "failed", { error: String(error) }));
     await prisma.run.update({
@@ -267,6 +288,13 @@ export async function startRun(prisma: PrismaClient, runId: string) {
         artifacts: toJson(artifacts)
       }
     });
+    void safeDispatchWebhook("run.failed", {
+      runId: run.id,
+      workflowId: run.workflowId,
+      workflowVersion: run.workflowVersion,
+      status: "FAILED",
+      error: String(error)
+    });
   } finally {
     if (browser) {
       console.log(`[Runner] Closing browser for run ${run.id}...`);
@@ -275,6 +303,15 @@ export async function startRun(prisma: PrismaClient, runId: string) {
     }
     console.log(`[Runner] startRun finished for ${run.id}`);
   }
+}
+
+function safeDispatchWebhook(
+  event: "run.started" | "run.succeeded" | "run.failed" | "run.waiting_approval",
+  payload: Record<string, unknown>
+) {
+  return dispatchWebhookEvent(event, payload).catch((error) => {
+    console.error(`[Webhooks] dispatch failed for ${event}`, error);
+  });
 }
 
 async function runNodeWithRetry(args: {

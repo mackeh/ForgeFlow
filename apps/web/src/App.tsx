@@ -15,23 +15,45 @@ import {
   API_URL,
   approveRun,
   clearToken,
+  createAdminUser,
+  createWebhook,
   createWorkflow,
+  createWorkflowFromTemplate,
+  createSchedule,
+  deleteAdminUser,
+  deleteSchedule,
+  deleteWebhook,
+  getDashboardMetrics,
+  getAdminUsers,
+  getCurrentUser,
   deleteWorkflow,
+  getRoles,
   getRun,
   getRunDiff,
+  getSchedules,
   getSecrets,
+  getSystemTime,
+  getTemplates,
+  getWebhookEvents,
+  getWebhooks,
   getWorkflowRuns,
   getWorkflowVersions,
   getWorkflows,
   login,
   publishWorkflow,
   rollbackWorkflow,
+  runScheduleNow,
   runPreflight,
   saveSecret,
   startDesktopRecorder,
   startRecorder,
   startRun,
   stopDesktopRecorder,
+  testWebhook,
+  updateAdminUser,
+  updateRole,
+  updateWebhook,
+  updateSchedule,
   updateWorkflow
 } from "./api";
 import { ActionNode } from "./components/ActionNode";
@@ -77,6 +99,29 @@ export default function App() {
   const [secretKey, setSecretKey] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [workflowName, setWorkflowName] = useState("");
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateWorkflowName, setTemplateWorkflowName] = useState("");
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [scheduleName, setScheduleName] = useState("Daily Run");
+  const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
+  const [scheduleTimezone, setScheduleTimezone] = useState("");
+  const [scheduleTestMode, setScheduleTestMode] = useState(false);
+  const [dashboard, setDashboard] = useState<any | null>(null);
+  const [dashboardDays, setDashboardDays] = useState(7);
+  const [systemTime, setSystemTime] = useState<any | null>(null);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [roles, setRoles] = useState<any[]>([]);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState("operator");
+  const [webhookList, setWebhookList] = useState<any[]>([]);
+  const [webhookEvents, setWebhookEvents] = useState<string[]>([]);
+  const [webhookName, setWebhookName] = useState("Run Alerts");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookEventSelection, setWebhookEventSelection] = useState<string[]>(["run.failed"]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [snapToGrid, setSnapToGrid] = useState(true);
 
@@ -110,11 +155,44 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
+    getCurrentUser()
+      .then((user) => {
+        setCurrentUser(user);
+      })
+      .catch(showError);
     refreshWorkflows().catch(showError);
     getSecrets()
       .then(setSecrets)
       .catch(showError);
+    getTemplates()
+      .then((list) => {
+        setTemplates(list || []);
+        if (Array.isArray(list) && list.length && !selectedTemplateId) {
+          setSelectedTemplateId(list[0].id);
+        }
+      })
+      .catch(showError);
+    getSystemTime()
+      .then((value) => {
+        setSystemTime(value);
+        if (!scheduleTimezone) {
+          setScheduleTimezone(value.timezone);
+        }
+      })
+      .catch(showError);
+    refreshAdmin().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!message.includes("Missing permission")) {
+        showError(error);
+      }
+    });
+    refreshDashboard().catch(showError);
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !activeWorkflow?.id) return;
+    refreshSchedules(activeWorkflow.id).catch(showError);
+  }, [token, activeWorkflow?.id]);
 
   useEffect(() => {
     setWorkflowName(activeWorkflow?.name || "");
@@ -130,6 +208,11 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [activeRun?.id, activeRun?.status]);
+
+  useEffect(() => {
+    if (!token) return;
+    refreshDashboard(dashboardDays).catch(showError);
+  }, [dashboardDays, systemTime?.timezone, token]);
 
   const pushToast = (message: string, level: ToastLevel = "info") => {
     const id = toastIdRef.current++;
@@ -154,6 +237,36 @@ export default function App() {
     setWorkflowList(data);
     if ((forceSelectFirst || !activeWorkflow) && data.length) {
       await selectWorkflow(data[0]);
+    }
+  }
+
+  async function refreshSchedules(workflowId?: string) {
+    if (!workflowId) {
+      setSchedules([]);
+      return;
+    }
+    const list = await getSchedules(workflowId);
+    setSchedules(list || []);
+  }
+
+  async function refreshDashboard(days = dashboardDays) {
+    const value = await getDashboardMetrics(days, systemTime?.timezone);
+    setDashboard(value);
+  }
+
+  async function refreshAdmin() {
+    const [userList, roleList, hooks, events] = await Promise.all([
+      getAdminUsers(),
+      getRoles(),
+      getWebhooks(),
+      getWebhookEvents()
+    ]);
+    setAdminUsers(userList || []);
+    setRoles(roleList || []);
+    setWebhookList(hooks || []);
+    setWebhookEvents(events || []);
+    if (Array.isArray(events) && events.length && webhookEventSelection.length === 0) {
+      setWebhookEventSelection([events[0]]);
     }
   }
 
@@ -189,7 +302,10 @@ export default function App() {
 
   const handleLogin = async (username: string, password: string) => {
     try {
-      await login(username, password);
+      const result = await login(username, password);
+      if (result?.user) {
+        setCurrentUser(result.user);
+      }
       setToken(localStorage.getItem("token"));
       setFeedback("Signed in", "success");
     } catch (err: any) {
@@ -203,6 +319,23 @@ export default function App() {
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
     setFeedback("Workflow created", "success");
+    await refreshDashboard();
+  };
+
+  const handleCreateFromTemplate = async () => {
+    if (!selectedTemplateId) {
+      setFeedback("Select a template first", "error");
+      return;
+    }
+    const created = await createWorkflowFromTemplate({
+      templateId: selectedTemplateId,
+      name: templateWorkflowName.trim() || undefined
+    });
+    setTemplateWorkflowName("");
+    setWorkflowList((list) => [created, ...list]);
+    await selectWorkflow(created);
+    setFeedback("Workflow created from template", "success");
+    await refreshDashboard();
   };
 
   const handleLogout = () => {
@@ -215,6 +348,15 @@ export default function App() {
     setRunDiff(null);
     setVersions([]);
     setSecrets([]);
+    setTemplates([]);
+    setSchedules([]);
+    setDashboard(null);
+    setSystemTime(null);
+    setCurrentUser(null);
+    setAdminUsers([]);
+    setRoles([]);
+    setWebhookList([]);
+    setWebhookEvents([]);
     setNodes(defaultDefinition.nodes as Node[]);
     setEdges(defaultDefinition.edges as Edge[]);
     setStatus("");
@@ -250,6 +392,7 @@ export default function App() {
     setFeedback(testMode ? "Test run started" : "Run started", "success");
     await refreshWorkflowMeta(activeWorkflow.id);
     await loadRun(run.id);
+    await refreshDashboard();
   };
 
   const handlePublish = async () => {
@@ -507,6 +650,7 @@ export default function App() {
     if (activeWorkflow) {
       await refreshWorkflowMeta(activeWorkflow.id);
     }
+    await refreshDashboard();
   };
 
   const handleSaveSecret = async () => {
@@ -517,6 +661,87 @@ export default function App() {
     const list = await getSecrets();
     setSecrets(list);
     setFeedback("Secret saved", "success");
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUserName.trim() || !newUserPassword) {
+      setFeedback("Username and password are required", "error");
+      return;
+    }
+    await createAdminUser({
+      username: newUserName.trim(),
+      password: newUserPassword,
+      role: newUserRole
+    });
+    setNewUserName("");
+    setNewUserPassword("");
+    await refreshAdmin();
+    setFeedback("User created", "success");
+  };
+
+  const handleToggleUser = async (user: any) => {
+    await updateAdminUser(user.username, { disabled: !user.disabled });
+    await refreshAdmin();
+    setFeedback(user.disabled ? "User enabled" : "User disabled", "success");
+  };
+
+  const handlePromoteUser = async (user: any) => {
+    const role = user.role === "operator" ? "viewer" : user.role === "viewer" ? "admin" : "operator";
+    await updateAdminUser(user.username, { role });
+    await refreshAdmin();
+    setFeedback(`Role updated to ${role}`, "success");
+  };
+
+  const handleDeleteUser = async (username: string) => {
+    await deleteAdminUser(username);
+    await refreshAdmin();
+    setFeedback("User deleted", "success");
+  };
+
+  const handleCreateWebhook = async () => {
+    if (!webhookName.trim() || !webhookUrl.trim()) {
+      setFeedback("Webhook name and URL are required", "error");
+      return;
+    }
+    if (!webhookEventSelection.length) {
+      setFeedback("Select at least one webhook event", "error");
+      return;
+    }
+    await createWebhook({
+      name: webhookName.trim(),
+      url: webhookUrl.trim(),
+      events: webhookEventSelection,
+      secret: webhookSecret.trim() || undefined
+    });
+    setWebhookName("Run Alerts");
+    setWebhookUrl("");
+    setWebhookSecret("");
+    await refreshAdmin();
+    setFeedback("Webhook created", "success");
+  };
+
+  const handleToggleWebhook = async (hook: any) => {
+    await updateWebhook(hook.id, { enabled: !hook.enabled });
+    await refreshAdmin();
+    setFeedback(hook.enabled ? "Webhook disabled" : "Webhook enabled", "success");
+  };
+
+  const handleDeleteWebhook = async (id: string) => {
+    await deleteWebhook(id);
+    await refreshAdmin();
+    setFeedback("Webhook deleted", "success");
+  };
+
+  const handleTestWebhook = async (id: string) => {
+    const result = await testWebhook(id);
+    setFeedback(`Webhook test sent (${result.delivered || 0}/${result.attempted || 1})`, "info");
+    await refreshAdmin();
+  };
+
+  const handleEnableViewerReadOnly = async () => {
+    await updateRole("viewer", ["workflows:read", "templates:read", "metrics:read", "secrets:read"]);
+    await refreshAdmin();
+    setFeedback("Viewer role updated", "success");
   };
 
   const handleRenameWorkflow = async () => {
@@ -542,6 +767,49 @@ export default function App() {
     setRollbackVersion("");
     await refreshWorkflows(true);
     setFeedback("Workflow deleted", "success");
+    await refreshDashboard();
+  };
+
+  const handleCreateSchedule = async () => {
+    if (!activeWorkflow) {
+      setFeedback("Select a workflow first", "error");
+      return;
+    }
+    const timezone = scheduleTimezone || systemTime?.timezone;
+    const created = await createSchedule({
+      workflowId: activeWorkflow.id,
+      name: scheduleName.trim() || "Scheduled run",
+      cron: scheduleCron.trim(),
+      timezone,
+      enabled: true,
+      testMode: scheduleTestMode
+    });
+    setSchedules((prev) => [created, ...prev]);
+    setFeedback("Schedule created", "success");
+    await refreshDashboard();
+  };
+
+  const handleToggleSchedule = async (schedule: any) => {
+    const updated = await updateSchedule(schedule.id, { enabled: !schedule.enabled });
+    setSchedules((prev) => prev.map((row) => (row.id === schedule.id ? updated : row)));
+    setFeedback(updated.enabled ? "Schedule enabled" : "Schedule disabled", "success");
+    await refreshDashboard();
+  };
+
+  const handleDeleteSchedule = async (scheduleId: string) => {
+    await deleteSchedule(scheduleId);
+    setSchedules((prev) => prev.filter((row) => row.id !== scheduleId));
+    setFeedback("Schedule deleted", "success");
+    await refreshDashboard();
+  };
+
+  const handleRunScheduleNow = async (scheduleId: string) => {
+    const result = await runScheduleNow(scheduleId);
+    setFeedback(result.executed ? "Scheduled run queued" : "Schedule already running", "info");
+    await refreshDashboard();
+    if (activeWorkflow) {
+      await refreshWorkflowMeta(activeWorkflow.id);
+    }
   };
 
   const handleSaveWorkflowFile = () => {
@@ -600,6 +868,13 @@ export default function App() {
     };
   };
 
+  const currentPermissions: string[] = Array.isArray(currentUser?.permissions) ? currentUser.permissions : [];
+  const isAdminUser = currentPermissions.includes("*");
+  const canManageUsers = isAdminUser || currentPermissions.includes("users:manage");
+  const canManageRoles = isAdminUser || currentPermissions.includes("roles:manage");
+  const canManageWebhooks = isAdminUser || currentPermissions.includes("webhooks:manage");
+  const availableRoleNames = roles.map((entry) => entry.role);
+
   if (!token) {
     return (
       <div className="login">
@@ -637,6 +912,9 @@ export default function App() {
           handleCreateWorkflow().catch(showError);
         }}
       >
+        <small>
+          User: <strong>{currentUser?.username || "-"}</strong> ({currentUser?.role || "unknown"})
+        </small>
         <h3>Workflow</h3>
         <input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="Workflow name" />
         <button onClick={() => handleRenameWorkflow().catch(showError)}>Rename</button>
@@ -648,6 +926,168 @@ export default function App() {
         <button className="secondary" onClick={handleLogout}>
           Logout
         </button>
+        <h3>Templates</h3>
+        <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
+          <option value="">Select template</option>
+          {templates.map((template) => (
+            <option key={template.id} value={template.id}>
+              {template.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={templateWorkflowName}
+          onChange={(e) => setTemplateWorkflowName(e.target.value)}
+          placeholder="New workflow name (optional)"
+        />
+        <button onClick={() => handleCreateFromTemplate().catch(showError)}>Create From Template</button>
+        <h3>Schedules</h3>
+        <input value={scheduleName} onChange={(e) => setScheduleName(e.target.value)} placeholder="Schedule name" />
+        <input value={scheduleCron} onChange={(e) => setScheduleCron(e.target.value)} placeholder="Cron (local time)" />
+        <input
+          value={scheduleTimezone}
+          onChange={(e) => setScheduleTimezone(e.target.value)}
+          placeholder={systemTime?.timezone || "Timezone"}
+        />
+        <label className="inline-option">
+          <input type="checkbox" checked={scheduleTestMode} onChange={(e) => setScheduleTestMode(e.target.checked)} />
+          <span>Run in test mode</span>
+        </label>
+        <button onClick={() => handleCreateSchedule().catch(showError)}>Add Schedule</button>
+        <div className="schedule-list">
+          {schedules.slice(0, 8).map((schedule) => (
+            <div key={schedule.id} className="schedule-item">
+              <div>
+                <strong>{schedule.name}</strong>
+                <small>
+                  {schedule.cron} ({schedule.timezone})
+                </small>
+              </div>
+              <div className="schedule-actions">
+                <button onClick={() => handleRunScheduleNow(schedule.id).catch(showError)}>Run now</button>
+                <button onClick={() => handleToggleSchedule(schedule).catch(showError)}>
+                  {schedule.enabled ? "Disable" : "Enable"}
+                </button>
+                <button className="danger" onClick={() => handleDeleteSchedule(schedule.id).catch(showError)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {canManageUsers ? (
+          <>
+            <h3>Users</h3>
+            <input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} placeholder="Username" />
+            <input
+              value={newUserPassword}
+              onChange={(e) => setNewUserPassword(e.target.value)}
+              type="password"
+              placeholder="Password (min 8)"
+            />
+            <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)}>
+              {(availableRoleNames.length ? availableRoleNames : ["operator", "viewer", "admin"]).map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+            <button onClick={() => handleCreateUser().catch(showError)}>Create User</button>
+            <div className="schedule-list">
+              {adminUsers.slice(0, 8).map((user) => (
+                <div key={user.username} className="schedule-item">
+                  <div>
+                    <strong>{user.username}</strong>
+                    <small>
+                      {user.role} {user.disabled ? "(disabled)" : ""}
+                    </small>
+                  </div>
+                  <div className="schedule-actions">
+                    <button onClick={() => handlePromoteUser(user).catch(showError)}>Cycle Role</button>
+                    <button onClick={() => handleToggleUser(user).catch(showError)}>
+                      {user.disabled ? "Enable" : "Disable"}
+                    </button>
+                    <button className="danger" onClick={() => handleDeleteUser(user.username).catch(showError)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
+        {canManageRoles ? (
+          <>
+            <h3>RBAC</h3>
+            <button onClick={() => handleEnableViewerReadOnly().catch(showError)}>Apply Viewer Read-Only Preset</button>
+          </>
+        ) : null}
+        {canManageWebhooks ? (
+          <>
+            <h3>Webhooks</h3>
+            <input value={webhookName} onChange={(e) => setWebhookName(e.target.value)} placeholder="Webhook name" />
+            <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://..." />
+            <input
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+              placeholder="Signing secret (optional)"
+            />
+            <select
+              value=""
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) return;
+                setWebhookEventSelection((prev) => (prev.includes(value) ? prev : [...prev, value]));
+                e.target.value = "";
+              }}
+            >
+              <option value="">Add event</option>
+              {webhookEvents
+                .filter((event) => !webhookEventSelection.includes(event))
+                .map((event) => (
+                  <option key={event} value={event}>
+                    {event}
+                  </option>
+                ))}
+            </select>
+            <div className="selected-events">
+              {webhookEventSelection.map((event) => (
+                <button
+                  key={event}
+                  className="chip"
+                  onClick={() => setWebhookEventSelection((prev) => prev.filter((entry) => entry !== event))}
+                >
+                  {event} x
+                </button>
+              ))}
+            </div>
+            <button onClick={() => handleCreateWebhook().catch(showError)}>Create Webhook</button>
+            <div className="schedule-list">
+              {webhookList.slice(0, 8).map((hook) => (
+                <div key={hook.id} className="schedule-item">
+                  <div>
+                    <strong>{hook.name}</strong>
+                    <small>{hook.url}</small>
+                    <small>{(hook.events || []).join(", ")}</small>
+                    <small>
+                      Last: {hook.lastDeliveryStatus || "never"}
+                      {hook.lastDeliveryError ? ` (${hook.lastDeliveryError})` : ""}
+                    </small>
+                  </div>
+                  <div className="schedule-actions">
+                    <button onClick={() => handleTestWebhook(hook.id).catch(showError)}>Test</button>
+                    <button onClick={() => handleToggleWebhook(hook).catch(showError)}>
+                      {hook.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button className="danger" onClick={() => handleDeleteWebhook(hook.id).catch(showError)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
         <h3>Versions</h3>
         <select
           value={rollbackVersion}
@@ -709,6 +1149,44 @@ export default function App() {
           </div>
         </div>
 
+        <div className="metrics-strip">
+          <div className="metric-card">
+            <span>Local Time</span>
+            <strong>{systemTime?.localTime || "-"}</strong>
+            <small>{systemTime?.timezone || "unknown timezone"}</small>
+          </div>
+          <div className="metric-card">
+            <span>Success Rate</span>
+            <strong>{dashboard?.summary?.successRate ?? 0}%</strong>
+            <small>{dashboard?.summary?.succeeded ?? 0} succeeded</small>
+          </div>
+          <div className="metric-card">
+            <span>Total Runs</span>
+            <strong>{dashboard?.summary?.totalRuns ?? 0}</strong>
+            <small>{dashboard?.summary?.failed ?? 0} failed</small>
+          </div>
+          <div className="metric-card">
+            <span>Avg Duration</span>
+            <strong>{dashboard?.summary?.avgDurationMs ?? 0}ms</strong>
+            <small>{dashboard?.summary?.running ?? 0} running now</small>
+          </div>
+          <div className="metric-card">
+            <span>Schedules</span>
+            <strong>{dashboard?.schedules?.active ?? 0}</strong>
+            <small>{dashboard?.schedules?.total ?? 0} total</small>
+          </div>
+          <div className="metric-card metric-controls">
+            <span>Dashboard Window</span>
+            <select value={dashboardDays} onChange={(e) => setDashboardDays(Number(e.target.value))}>
+              <option value={1}>1 day</option>
+              <option value={7}>7 days</option>
+              <option value={14}>14 days</option>
+              <option value={30}>30 days</option>
+            </select>
+            <button onClick={() => refreshDashboard().catch(showError)}>Refresh</button>
+          </div>
+        </div>
+
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -764,6 +1242,16 @@ export default function App() {
             ))}
             {activeRun?.artifacts?.length ? (
               <small>{activeRun.artifacts.length} failure artifacts captured in /artifacts</small>
+            ) : null}
+            {dashboard?.topFailures?.length ? (
+              <div className="top-failures">
+                <strong>Top Node Failures</strong>
+                {dashboard.topFailures.slice(0, 4).map((item: any) => (
+                  <small key={item.nodeId}>
+                    {item.nodeId}: {item.count}
+                  </small>
+                ))}
+              </div>
             ) : null}
           </div>
         </div>

@@ -19,6 +19,7 @@ __pycache__/
 # Generated/runtime folders
 apps/agent/recordings/
 apps/server/artifacts/
+apps/server/data/
 apps/server/prisma/migrations_root_owned_backup/
 
 # IDE

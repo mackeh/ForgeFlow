@@ -5,7 +5,7 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { signToken, authMiddleware, verifyLogin } from "./lib/auth.js";
+import { authMiddleware, getAuthContext, requirePermission, signToken, verifyLogin } from "./lib/auth.js";
 import { startWebRecorder, attachRecorderWs } from "./lib/recorder.js";
 import { startRun } from "./lib/runner.js";
 import { startDesktopRecording, stopDesktopRecording } from "./lib/agent.js";
@@ -20,11 +20,42 @@ import { listSecrets, upsertSecret } from "./lib/secrets.js";
 import { preflightForDefinition, preflightForWorkflowId } from "./lib/preflight.js";
 import { diffRunNodeStates } from "./lib/runDiff.js";
 import { loadRateLimitConfig } from "./lib/rateLimit.js";
+import { buildDashboardMetrics } from "./lib/metrics.js";
+import { WorkflowScheduler } from "./lib/scheduler.js";
+import {
+  createSchedule,
+  defaultScheduleTimezone,
+  deleteSchedule,
+  deleteSchedulesForWorkflow,
+  getSchedule,
+  listSchedules,
+  normalizeScheduleTimezone,
+  updateSchedule
+} from "./lib/scheduleStore.js";
+import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
+import {
+  createUser,
+  deleteUser,
+  listRoles,
+  listUsers,
+  updateUser,
+  upsertRolePermissions
+} from "./lib/authzStore.js";
+import {
+  createWebhook,
+  deleteWebhook,
+  getWebhook,
+  listWebhookEventTypes,
+  listWebhooks,
+  updateWebhook
+} from "./lib/webhookStore.js";
+import { dispatchWebhookTest } from "./lib/webhooks.js";
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 const prisma = new PrismaClient();
+const scheduler = new WorkflowScheduler(prisma);
 const rateLimitConfig = loadRateLimitConfig();
 
 app.use(cors());
@@ -69,23 +100,91 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
     return;
   }
   const { username, password } = parsed.data;
-  const ok = await verifyLogin(username, password);
-  if (!ok) {
+  const authUser = await verifyLogin(username, password);
+  if (!authUser) {
     res.status(401).json({ error: "Invalid credentials or temporarily locked account" });
     return;
   }
-  const token = signToken({ username });
-  res.json({ token });
+  const token = signToken({ username: authUser.username, role: authUser.role });
+  res.json({ token, user: authUser });
 });
 
 app.use(authMiddleware);
 
-app.get("/api/workflows", async (_req, res) => {
+app.get("/api/auth/me", (req, res) => {
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  res.json(auth);
+});
+
+const canReadWorkflows = requirePermission("workflows:read");
+const canWriteWorkflows = requirePermission("workflows:write");
+const canExecuteWorkflows = requirePermission("workflows:execute");
+const canApproveWorkflows = requirePermission("workflows:approve");
+const canManageSchedules = requirePermission("schedules:manage");
+const canReadTemplates = requirePermission("templates:read");
+const canReadMetrics = requirePermission("metrics:read");
+const canReadSecrets = requirePermission("secrets:read");
+const canWriteSecrets = requirePermission("secrets:write");
+const canManageUsers = requirePermission("users:manage");
+const canManageRoles = requirePermission("roles:manage");
+const canManageWebhooks = requirePermission("webhooks:manage");
+
+app.get("/api/system/time", (_req, res) => {
+  const timezone = defaultScheduleTimezone();
+  const now = new Date();
+  const localTime = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(now);
+  res.json({ nowUtc: now.toISOString(), timezone, localTime });
+});
+
+app.get("/api/templates", canReadTemplates, (_req, res) => {
+  res.json(listWorkflowTemplates());
+});
+
+app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({
+    templateId: z.string(),
+    name: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  const template = getWorkflowTemplate(parsed.data.templateId);
+  if (!template) {
+    res.status(404).json({ error: "Template not found" });
+    return;
+  }
+
+  const workflow = await prisma.workflow.create({
+    data: {
+      name: parsed.data.name?.trim() || template.name,
+      definition: template.definition as any,
+      draftDefinition: template.definition as any
+    }
+  });
+  await saveDraftWorkflow(prisma, workflow.id, template.definition, `Created from template ${template.id}`);
+  res.json(workflow);
+});
+
+app.get("/api/workflows", canReadWorkflows, async (_req, res) => {
   const workflows = await prisma.workflow.findMany({ orderBy: { updatedAt: "desc" } });
   res.json(workflows);
 });
 
-app.post("/api/workflows", async (req, res) => {
+app.post("/api/workflows", canWriteWorkflows, async (req, res) => {
   const schema = z.object({ name: z.string(), definition: z.any().optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -113,7 +212,7 @@ app.post("/api/workflows", async (req, res) => {
   res.json(workflow);
 });
 
-app.put("/api/workflows/:id", async (req, res) => {
+app.put("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
   const schema = z.object({ name: z.string().optional(), definition: z.any().optional(), notes: z.string().optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -140,7 +239,7 @@ app.put("/api/workflows/:id", async (req, res) => {
   }
 });
 
-app.post("/api/workflows/:id/publish", async (req, res) => {
+app.post("/api/workflows/:id/publish", canWriteWorkflows, async (req, res) => {
   const schema = z.object({ notes: z.string().optional() });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -155,7 +254,7 @@ app.post("/api/workflows/:id/publish", async (req, res) => {
   }
 });
 
-app.get("/api/workflows/:id/versions", async (req, res) => {
+app.get("/api/workflows/:id/versions", canReadWorkflows, async (req, res) => {
   const versions = await prisma.workflowVersion.findMany({
     where: { workflowId: req.params.id },
     orderBy: { version: "desc" }
@@ -163,7 +262,7 @@ app.get("/api/workflows/:id/versions", async (req, res) => {
   res.json(versions);
 });
 
-app.post("/api/workflows/:id/rollback", async (req, res) => {
+app.post("/api/workflows/:id/rollback", canWriteWorkflows, async (req, res) => {
   const schema = z.object({ version: z.number() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -178,16 +277,102 @@ app.post("/api/workflows/:id/rollback", async (req, res) => {
   }
 });
 
-app.delete("/api/workflows/:id", async (req, res) => {
+app.delete("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
   try {
+    await deleteSchedulesForWorkflow(req.params.id);
     await deleteWorkflow(prisma, req.params.id);
+    await scheduler.refresh();
     res.json({ ok: true });
   } catch (error) {
     res.status(404).json({ error: String(error) });
   }
 });
 
-app.post("/api/runs/start", async (req, res) => {
+app.get("/api/schedules", canManageSchedules, async (req, res) => {
+  const workflowId =
+    typeof req.query.workflowId === "string" && req.query.workflowId.trim() ? req.query.workflowId.trim() : undefined;
+  const schedules = await listSchedules(workflowId);
+  res.json(schedules);
+});
+
+app.post("/api/schedules", canManageSchedules, async (req, res) => {
+  const schema = z.object({
+    workflowId: z.string(),
+    name: z.string().optional(),
+    cron: z.string(),
+    timezone: z.string().optional(),
+    enabled: z.boolean().optional(),
+    testMode: z.boolean().optional(),
+    inputData: z.any().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+
+  const workflow = await prisma.workflow.findUnique({ where: { id: parsed.data.workflowId } });
+  if (!workflow) {
+    res.status(404).json({ error: "Workflow not found" });
+    return;
+  }
+
+  try {
+    const schedule = await createSchedule({
+      ...parsed.data,
+      timezone: normalizeScheduleTimezone(parsed.data.timezone)
+    });
+    await scheduler.refresh();
+    res.json(schedule);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.put("/api/schedules/:id", canManageSchedules, async (req, res) => {
+  const schema = z.object({
+    name: z.string().optional(),
+    cron: z.string().optional(),
+    timezone: z.string().optional(),
+    enabled: z.boolean().optional(),
+    testMode: z.boolean().optional(),
+    inputData: z.any().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const schedule = await updateSchedule(req.params.id, parsed.data);
+    await scheduler.refresh();
+    res.json(schedule);
+  } catch (error) {
+    res.status(404).json({ error: String(error) });
+  }
+});
+
+app.delete("/api/schedules/:id", canManageSchedules, async (req, res) => {
+  const removed = await deleteSchedule(req.params.id);
+  await scheduler.refresh();
+  if (!removed) {
+    res.status(404).json({ error: "Schedule not found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/schedules/:id/run-now", canManageSchedules, async (req, res) => {
+  const schedule = await getSchedule(req.params.id);
+  if (!schedule) {
+    res.status(404).json({ error: "Schedule not found" });
+    return;
+  }
+  const executed = await scheduler.runNow(req.params.id);
+  res.json({ ok: true, executed });
+});
+
+app.post("/api/runs/start", canExecuteWorkflows, async (req, res) => {
   const schema = z.object({
     workflowId: z.string(),
     testMode: z.boolean().optional(),
@@ -240,7 +425,7 @@ app.post("/api/runs/start", async (req, res) => {
   }
 });
 
-app.post("/api/system/preflight", async (req, res) => {
+app.post("/api/system/preflight", canExecuteWorkflows, async (req, res) => {
   const schema = z.object({
     workflowId: z.string().optional(),
     definition: z.any().optional()
@@ -269,7 +454,7 @@ app.post("/api/system/preflight", async (req, res) => {
   }
 });
 
-app.get("/api/workflows/:id/runs", async (req, res) => {
+app.get("/api/workflows/:id/runs", canReadWorkflows, async (req, res) => {
   const runs = await prisma.run.findMany({
     where: { workflowId: req.params.id },
     orderBy: { createdAt: "desc" },
@@ -278,7 +463,7 @@ app.get("/api/workflows/:id/runs", async (req, res) => {
   res.json(runs);
 });
 
-app.get("/api/runs/:id", async (req, res) => {
+app.get("/api/runs/:id", canReadWorkflows, async (req, res) => {
   const run = await prisma.run.findUnique({ where: { id: req.params.id } });
   if (!run) {
     res.status(404).json({ error: "Run not found" });
@@ -287,7 +472,7 @@ app.get("/api/runs/:id", async (req, res) => {
   res.json(run);
 });
 
-app.post("/api/runs/:id/approve", async (req, res) => {
+app.post("/api/runs/:id/approve", canApproveWorkflows, async (req, res) => {
   const schema = z.object({ nodeId: z.string(), approved: z.boolean() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -320,7 +505,7 @@ app.post("/api/runs/:id/approve", async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/runs/:id/diff-last-success", async (req, res) => {
+app.get("/api/runs/:id/diff-last-success", canReadWorkflows, async (req, res) => {
   const run = await prisma.run.findUnique({ where: { id: req.params.id } });
   if (!run) {
     res.status(404).json({ error: "Run not found" });
@@ -343,12 +528,191 @@ app.get("/api/runs/:id/diff-last-success", async (req, res) => {
   res.json(diffRunNodeStates(run as any, prev as any));
 });
 
-app.get("/api/secrets", async (_req, res) => {
+app.get("/api/metrics/dashboard", canReadMetrics, async (req, res) => {
+  const daysRaw = typeof req.query.days === "string" ? Number(req.query.days) : 7;
+  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(30, Math.floor(daysRaw))) : 7;
+  const timezone = normalizeScheduleTimezone(typeof req.query.timezone === "string" ? req.query.timezone : undefined);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const runs = await prisma.run.findMany({
+    where: { createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
+    take: 2000
+  });
+  const schedules = await listSchedules();
+  const activeSchedules = schedules.filter((schedule) => schedule.enabled).length;
+  const metrics = buildDashboardMetrics(runs as any, timezone, days);
+
+  res.json({
+    ...metrics,
+    schedules: {
+      total: schedules.length,
+      active: activeSchedules,
+      disabled: schedules.length - activeSchedules
+    }
+  });
+});
+
+app.get("/api/admin/users", canManageUsers, async (_req, res) => {
+  const users = await listUsers();
+  res.json(users);
+});
+
+app.post("/api/admin/users", canManageUsers, async (req, res) => {
+  const schema = z.object({
+    username: z.string().min(1),
+    password: z.string().min(8),
+    role: z.string().optional(),
+    disabled: z.boolean().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const user = await createUser(parsed.data);
+    res.json(user);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.put("/api/admin/users/:username", canManageUsers, async (req, res) => {
+  const schema = z.object({
+    role: z.string().optional(),
+    password: z.string().min(8).optional(),
+    disabled: z.boolean().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const user = await updateUser(req.params.username, parsed.data);
+    res.json(user);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.delete("/api/admin/users/:username", canManageUsers, async (req, res) => {
+  try {
+    const removed = await deleteUser(req.params.username);
+    if (!removed) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.get("/api/admin/roles", canManageRoles, async (_req, res) => {
+  const roles = await listRoles();
+  res.json(roles);
+});
+
+app.put("/api/admin/roles/:role", canManageRoles, async (req, res) => {
+  const schema = z.object({
+    permissions: z.array(z.string()).min(1)
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const role = await upsertRolePermissions(req.params.role, parsed.data.permissions);
+    res.json(role);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.get("/api/webhooks/events", canManageWebhooks, (_req, res) => {
+  res.json(listWebhookEventTypes());
+});
+
+app.get("/api/webhooks", canManageWebhooks, async (_req, res) => {
+  const hooks = await listWebhooks();
+  res.json(hooks);
+});
+
+app.post("/api/webhooks", canManageWebhooks, async (req, res) => {
+  const schema = z.object({
+    name: z.string().min(1),
+    url: z.string().url(),
+    events: z.array(z.string()).min(1),
+    enabled: z.boolean().optional(),
+    secret: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const hook = await createWebhook(parsed.data);
+    res.json(hook);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.put("/api/webhooks/:id", canManageWebhooks, async (req, res) => {
+  const schema = z.object({
+    name: z.string().optional(),
+    url: z.string().url().optional(),
+    events: z.array(z.string()).optional(),
+    enabled: z.boolean().optional(),
+    secret: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const hook = await updateWebhook(req.params.id, parsed.data);
+    res.json(hook);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.delete("/api/webhooks/:id", canManageWebhooks, async (req, res) => {
+  const removed = await deleteWebhook(req.params.id);
+  if (!removed) {
+    res.status(404).json({ error: "Webhook not found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/webhooks/:id/test", canManageWebhooks, async (req, res) => {
+  const hook = await getWebhook(req.params.id);
+  if (!hook) {
+    res.status(404).json({ error: "Webhook not found" });
+    return;
+  }
+  const result = await dispatchWebhookTest(hook.id, {
+    webhookId: hook.id,
+    name: hook.name
+  });
+  res.json({ ok: true, ...result });
+});
+
+app.get("/api/secrets", canReadSecrets, async (_req, res) => {
   const secrets = await listSecrets(prisma);
   res.json(secrets);
 });
 
-app.post("/api/secrets", async (req, res) => {
+app.post("/api/secrets", canWriteSecrets, async (req, res) => {
   const schema = z.object({ key: z.string().min(1), value: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -364,7 +728,7 @@ app.post("/api/secrets", async (req, res) => {
   }
 });
 
-app.post("/api/recorders/web/start", async (req, res) => {
+app.post("/api/recorders/web/start", canWriteWorkflows, async (req, res) => {
   const schema = z.object({ startUrl: z.string().url().optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -375,7 +739,7 @@ app.post("/api/recorders/web/start", async (req, res) => {
   res.json(session);
 });
 
-app.post("/api/recorders/desktop/start", async (req, res) => {
+app.post("/api/recorders/desktop/start", canWriteWorkflows, async (req, res) => {
   const schema = z.object({ label: z.string().optional() });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -386,7 +750,7 @@ app.post("/api/recorders/desktop/start", async (req, res) => {
   res.json(session);
 });
 
-app.post("/api/recorders/desktop/stop", async (_req, res) => {
+app.post("/api/recorders/desktop/stop", canWriteWorkflows, async (_req, res) => {
   const result = await stopDesktopRecording();
   res.json(result);
 });
@@ -394,6 +758,14 @@ app.post("/api/recorders/desktop/stop", async (_req, res) => {
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 server.listen(port, () => {
   console.log(`Server listening on ${port}`);
+  scheduler.start().catch((error) => console.error("Failed to start scheduler", error));
+});
+
+process.on("SIGINT", () => {
+  scheduler.stop();
+});
+process.on("SIGTERM", () => {
+  scheduler.stop();
 });
 
 function resetNodeStatesForResume(raw: unknown) {

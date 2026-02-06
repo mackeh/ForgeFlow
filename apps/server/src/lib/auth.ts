@@ -1,14 +1,24 @@
 import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
-import argon2 from "argon2";
 import type { Request, Response, NextFunction } from "express";
+import { resolvePermissionsForRole, verifyUserCredentials } from "./authzStore.js";
 
 const jwtSecret = process.env.JWT_SECRET || "dev_secret";
 const failedAttempts = new Map<string, { count: number; lockUntil: number }>();
 const maxAttempts = Number(process.env.AUTH_MAX_ATTEMPTS || 6);
 const lockMs = Number(process.env.AUTH_LOCK_MS || 5 * 60 * 1000);
 
-export function signToken(payload: { username: string }) {
+export type AuthTokenPayload = {
+  username: string;
+  role: string;
+};
+
+export type AuthContext = {
+  username: string;
+  role: string;
+  permissions: string[];
+};
+
+export function signToken(payload: AuthTokenPayload) {
   return jwt.sign(payload, jwtSecret, { expiresIn: "12h" });
 }
 
@@ -20,45 +30,64 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     return;
   }
   try {
-    jwt.verify(token, jwtSecret);
-    next();
-  } catch (err) {
+    const decoded = jwt.verify(token, jwtSecret) as AuthTokenPayload;
+    const username = String(decoded?.username || "").trim();
+    const role = String(decoded?.role || "").trim();
+    if (!username || !role) {
+      res.status(401).json({ error: "Invalid token payload" });
+      return;
+    }
+
+    resolvePermissionsForRole(role)
+      .then((permissions) => {
+        (req as any).auth = { username, role, permissions } satisfies AuthContext;
+        next();
+      })
+      .catch((error) => {
+        res.status(401).json({ error: String(error) });
+      });
+  } catch (_err) {
     res.status(401).json({ error: "Invalid token" });
   }
 }
 
+export function requirePermission(permission: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const auth = ((req as any).auth || null) as AuthContext | null;
+    if (!auth) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+    const allowed = auth.permissions.includes("*") || auth.permissions.includes(permission);
+    if (!allowed) {
+      res.status(403).json({ error: `Missing permission: ${permission}` });
+      return;
+    }
+    next();
+  };
+}
+
+export function getAuthContext(req: Request) {
+  return ((req as any).auth || null) as AuthContext | null;
+}
+
 export async function verifyLogin(username: string, password: string) {
-  const expectedUser = process.env.APP_USERNAME || "local";
-  const expectedPass = process.env.APP_PASSWORD || "localpass";
-  const argonHash = process.env.APP_PASSWORD_HASH_ARGON2 || "";
   const now = Date.now();
   const state = failedAttempts.get(username);
 
   if (state && state.lockUntil > now) {
-    return false;
+    return null;
   }
 
-  if (username !== expectedUser) {
-    registerFailure(username);
-    return false;
-  }
-
-  let ok = false;
-  if (argonHash.startsWith("$argon2")) {
-    ok = await argon2.verify(argonHash, password);
-  } else if (expectedPass.startsWith("$2a$") || expectedPass.startsWith("$2b$")) {
-    ok = await bcrypt.compare(password, expectedPass);
-  } else {
-    ok = password === expectedPass;
-  }
-
-  if (ok) {
+  const user = await verifyUserCredentials(username, password);
+  if (user) {
     failedAttempts.delete(username);
-    return true;
+    const permissions = await resolvePermissionsForRole(user.role);
+    return { username: user.username, role: user.role, permissions } satisfies AuthContext;
   }
 
   registerFailure(username);
-  return false;
+  return null;
 }
 
 function registerFailure(username: string) {
@@ -71,4 +100,12 @@ function registerFailure(username: string) {
 
 export function resetAuthStateForTests() {
   failedAttempts.clear();
+}
+
+export function decodeTokenForTests(token: string) {
+  try {
+    return jwt.verify(token, jwtSecret) as AuthTokenPayload;
+  } catch {
+    return null;
+  }
 }

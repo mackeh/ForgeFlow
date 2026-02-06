@@ -60,6 +60,9 @@ Detailed usage guide:
 - Run timeline and diff against last successful run.
 - UI toast feedback for key actions (save/publish/run/record/approve/error states).
 - Node auto-placement for new nodes, plus `Auto Layout` and `Snap: On/Off` controls in the toolbar.
+- Local multi-user auth store with RBAC permissions (`admin`, `operator`, `viewer`, and custom roles).
+- Webhook integrations for run lifecycle events (`run.started`, `run.succeeded`, `run.failed`, `run.waiting_approval`).
+- Scheduled executions run in local timezone by default and include schedule metadata in run input.
 
 ## UI improvements
 - Toast notifications provide immediate success/error/info feedback.
@@ -73,6 +76,7 @@ Detailed usage guide:
 
 ## API
 - `POST /api/auth/login`
+- `GET /api/auth/me`
 - `GET /api/workflows`
 - `POST /api/workflows`
 - `PUT /api/workflows/:id` (save draft)
@@ -90,6 +94,27 @@ Detailed usage guide:
 - `POST /api/recorders/web/start`
 - `POST /api/recorders/desktop/start`
 - `POST /api/recorders/desktop/stop`
+- `GET /api/templates`
+- `POST /api/workflows/from-template`
+- `GET /api/system/time`
+- `GET /api/schedules`
+- `POST /api/schedules`
+- `PUT /api/schedules/:id`
+- `DELETE /api/schedules/:id`
+- `POST /api/schedules/:id/run-now`
+- `GET /api/metrics/dashboard`
+- `GET /api/admin/users`
+- `POST /api/admin/users`
+- `PUT /api/admin/users/:username`
+- `DELETE /api/admin/users/:username`
+- `GET /api/admin/roles`
+- `PUT /api/admin/roles/:role`
+- `GET /api/webhooks/events`
+- `GET /api/webhooks`
+- `POST /api/webhooks`
+- `PUT /api/webhooks/:id`
+- `DELETE /api/webhooks/:id`
+- `POST /api/webhooks/:id/test`
 
 ## Auth and secrets env
 - `APP_USERNAME` and one of:
@@ -101,6 +126,8 @@ Detailed usage guide:
 - `RATE_LIMIT_MAX` max API requests per window (default `300`)
 - `RATE_LIMIT_LOGIN_MAX` max login attempts per window (default `25`)
 - `TRUST_PROXY=true` if running behind reverse proxy
+- `AUTHZ_FILE=./data/authz.json` path for local users/roles store
+- `WEBHOOKS_FILE=./data/webhooks.json` path for webhook configuration store
 
 ## Tests
 - Server tests:
