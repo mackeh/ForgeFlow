@@ -223,6 +223,58 @@ export default function App() {
     refreshDashboard(dashboardDays).catch(showError);
   }, [dashboardDays, systemTime?.timezone, token]);
 
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const element = target as HTMLElement | null;
+      if (!element) return false;
+      const tagName = element.tagName?.toLowerCase();
+      return (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        Boolean(element.isContentEditable)
+      );
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!token) return;
+      if (isEditableTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      const hasCmd = event.ctrlKey || event.metaKey;
+
+      if (hasCmd && key === "s") {
+        event.preventDefault();
+        void withActionLoading("save-draft", handleSave);
+        return;
+      }
+      if (hasCmd && key === "r") {
+        event.preventDefault();
+        void withActionLoading("run", () => runWorkflow(false));
+        return;
+      }
+      if (hasCmd && key === "t") {
+        event.preventDefault();
+        void withActionLoading("test-run", () => runWorkflow(true));
+        return;
+      }
+      if (key === "delete" || key === "backspace") {
+        event.preventDefault();
+        handleDeleteSelectedNode();
+        return;
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        void withActionLoading("auto-layout", autoLayoutNodes);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [token, selectedNode, activeWorkflow, nodes, edges]);
+
   const pushToast = (message: string, level: ToastLevel = "info") => {
     const id = toastIdRef.current++;
     setToasts((prev) => [...prev, { id, message, level }]);
@@ -538,21 +590,42 @@ export default function App() {
   const handleAddNode = (type: string, dataOverrides: Record<string, any> = {}): string => {
     const id = `${type}-${Date.now()}`;
     const lastNode = nodesRef.current[nodesRef.current.length - 1];
+    const sourceNode = selectedNode || lastNode || null;
+    const sourcePosition = sourceNode?.position || findNextNodePosition(nodesRef.current);
     const newNode: Node = {
       id,
       type: "action",
-      position: findNextNodePosition(nodesRef.current),
+      position: sourceNode
+        ? {
+            x: sourcePosition.x + 250,
+            y: sourcePosition.y
+          }
+        : findNextNodePosition(nodesRef.current),
       data: { label: type.replace(/_/g, " "), type, ...dataOverrides }
     };
     nodesRef.current = [...nodesRef.current, newNode];
     setNodes((nds) => [...nds, newNode]);
+    setSelectedNode(newNode);
 
-    if (lastNode) {
-      setEdges((eds) => [...eds, { id: `e-${lastNode.id}-${id}`, source: lastNode.id, target: id }]);
+    if (sourceNode) {
+      setEdges((eds) => [...eds, { id: `e-${sourceNode.id}-${id}`, source: sourceNode.id, target: id }]);
     }
 
     setStatus(`Added node: ${newNode.data?.label || type}`);
     return id;
+  };
+
+  const handleDeleteSelectedNode = () => {
+    if (!selectedNode) return;
+    const selectedType = String(selectedNode.data?.type || "");
+    if (selectedType === "start") {
+      setFeedback("Start node cannot be deleted", "error");
+      return;
+    }
+    setNodes((current) => current.filter((node) => node.id !== selectedNode.id));
+    setEdges((current) => current.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id));
+    setSelectedNode(null);
+    setFeedback(`Deleted node ${selectedNode.id}`, "info");
   };
 
   const validateWorkflowDefinition = (definition: any) => {

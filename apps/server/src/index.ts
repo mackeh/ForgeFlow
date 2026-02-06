@@ -7,7 +7,7 @@ import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { authMiddleware, getAuthContext, requirePermission, signToken, verifyLogin } from "./lib/auth.js";
 import { startWebRecorder, attachRecorderWs } from "./lib/recorder.js";
-import { startRun } from "./lib/runner.js";
+import { getActiveRunCount, startRun, waitForActiveRuns } from "./lib/runner.js";
 import { startDesktopRecording, stopDesktopRecording } from "./lib/agent.js";
 import {
   deleteWorkflow,
@@ -50,6 +50,7 @@ import {
   updateWebhook
 } from "./lib/webhookStore.js";
 import { dispatchWebhookTest } from "./lib/webhooks.js";
+import { collectHealth } from "./lib/health.js";
 
 const app = express();
 const server = createServer(app);
@@ -57,6 +58,11 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const prisma = new PrismaClient();
 const scheduler = new WorkflowScheduler(prisma);
 const rateLimitConfig = loadRateLimitConfig();
+const startedAt = Date.now();
+const shutdownTimeoutMs = Number(process.env.SHUTDOWN_TIMEOUT_MS || 30_000);
+let schedulerReady = false;
+let shuttingDown = false;
+let shutdownPromise: Promise<void> | null = null;
 
 app.use(cors());
 app.use(express.json({ limit: "8mb" }));
@@ -88,8 +94,41 @@ attachRecorderWs(wss);
 app.use("/recordings", express.static("/recordings"));
 app.use("/artifacts", express.static("/app/artifacts"));
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+app.get("/health", async (_req, res) => {
+  const health = await collectHealth(prisma);
+  const status = health.criticalOk ? 200 : 503;
+  res.status(status).json({
+    ...health,
+    schedulerReady,
+    shuttingDown,
+    activeRuns: getActiveRunCount(),
+    uptimeSec: Math.floor((Date.now() - startedAt) / 1000)
+  });
+});
+
+app.get("/ready", async (_req, res) => {
+  const health = await collectHealth(prisma);
+  const ready = !shuttingDown && schedulerReady && health.criticalOk;
+  res.status(ready ? 200 : 503).json({
+    ready,
+    schedulerReady,
+    shuttingDown,
+    criticalOk: health.criticalOk,
+    dependencies: health.dependencies,
+    activeRuns: getActiveRunCount()
+  });
+});
+
+app.use((req, res, next) => {
+  if (!shuttingDown) {
+    next();
+    return;
+  }
+  if (req.path === "/health" || req.path === "/ready") {
+    next();
+    return;
+  }
+  res.status(503).json({ error: "Server is shutting down" });
 });
 
 app.post("/api/auth/login", loginLimiter, async (req, res) => {
@@ -758,15 +797,57 @@ app.post("/api/recorders/desktop/stop", canWriteWorkflows, async (_req, res) => 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 server.listen(port, () => {
   console.log(`Server listening on ${port}`);
-  scheduler.start().catch((error) => console.error("Failed to start scheduler", error));
+  scheduler
+    .start()
+    .then(() => {
+      schedulerReady = true;
+      console.log("Scheduler started");
+    })
+    .catch((error) => console.error("Failed to start scheduler", error));
 });
 
 process.on("SIGINT", () => {
-  scheduler.stop();
+  void gracefulShutdown("SIGINT");
 });
 process.on("SIGTERM", () => {
-  scheduler.stop();
+  void gracefulShutdown("SIGTERM");
 });
+
+async function gracefulShutdown(signal: string) {
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
+  let exitCode = 0;
+  shutdownPromise = (async () => {
+    console.log(`[shutdown] Received ${signal}. Draining up to ${shutdownTimeoutMs}ms...`);
+    scheduler.stop();
+
+    const drained = await waitForActiveRuns(shutdownTimeoutMs);
+    if (!drained.drained) {
+      exitCode = 1;
+      console.warn(`[shutdown] Timed out waiting for runs. Remaining: ${drained.remaining}`);
+    }
+
+    await Promise.all([
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      }),
+      new Promise<void>((resolve) => {
+        wss.close(() => resolve());
+      })
+    ]);
+    await prisma.$disconnect();
+    console.log("[shutdown] Complete");
+  })()
+    .catch((error) => {
+      exitCode = 1;
+      console.error("[shutdown] Failed", error);
+    })
+    .finally(() => {
+      process.exit(exitCode);
+    });
+
+  return shutdownPromise;
+}
 
 function resetNodeStatesForResume(raw: unknown) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;

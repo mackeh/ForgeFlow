@@ -54,12 +54,27 @@ class RetryExecutionError extends Error {
   }
 }
 
+const activeRuns = new Set<string>();
+
+export function getActiveRunCount() {
+  return activeRuns.size;
+}
+
+export async function waitForActiveRuns(timeoutMs = 30_000) {
+  const started = Date.now();
+  while (activeRuns.size > 0 && Date.now() - started < timeoutMs) {
+    await sleep(250);
+  }
+  return { drained: activeRuns.size === 0, remaining: activeRuns.size };
+}
+
 export async function startRun(prisma: PrismaClient, runId: string) {
   const run = await prisma.run.findUnique({
     where: { id: runId },
     include: { workflow: true }
   });
   if (!run) return;
+  activeRuns.add(run.id);
 
   const definition = await resolveDefinitionForRun(prisma, run);
   const nodes = definition?.nodes || [];
@@ -301,6 +316,7 @@ export async function startRun(prisma: PrismaClient, runId: string) {
       await (browser as any).close();
       console.log(`[Runner] Browser closed for run ${run.id}.`);
     }
+    activeRuns.delete(run.id);
     console.log(`[Runner] startRun finished for ${run.id}`);
   }
 }
