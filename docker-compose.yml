@@ -34,11 +34,14 @@ services:
       - db
       - redis
       - ollama
+    environment:
+      DISPLAY: ${DISPLAY}
     volumes:
       - ./apps/server:/app
       - /app/node_modules
       - ./apps/agent/recordings:/recordings
       - ./apps/server/artifacts:/app/artifacts
+      - /tmp/.X11-unix:/tmp/.X11-unix
 
   web:
     build:
