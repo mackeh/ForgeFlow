@@ -73,6 +73,18 @@ export async function rollbackWorkflow(prisma: PrismaClient, workflowId: string,
   });
 }
 
+export async function deleteWorkflow(prisma: PrismaClient, workflowId: string) {
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.workflow.findUnique({ where: { id: workflowId } });
+    if (!existing) {
+      throw new Error("Workflow not found");
+    }
+    await tx.run.deleteMany({ where: { workflowId } });
+    await tx.workflowVersion.deleteMany({ where: { workflowId } });
+    await tx.workflow.delete({ where: { id: workflowId } });
+  });
+}
+
 export async function getWorkflowDefinitionForRun(
   prisma: PrismaClient,
   workflowId: string,

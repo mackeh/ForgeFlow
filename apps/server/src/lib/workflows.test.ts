@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensureWorkflowVersion, getWorkflowDefinitionForRun } from "./workflows.js";
+import { deleteWorkflow, ensureWorkflowVersion, getWorkflowDefinitionForRun } from "./workflows.js";
 
 test("ensureWorkflowVersion increments version", async () => {
   const created: any[] = [];
@@ -37,4 +37,32 @@ test("getWorkflowDefinitionForRun prefers draft in test mode", async () => {
   assert.equal(testDef.definition.nodes[0].id, "d");
   assert.equal(prodDef.definition.nodes[0].id, "p");
   assert.equal(prodDef.version, 7);
+});
+
+test("deleteWorkflow removes runs and versions before workflow", async () => {
+  const order: string[] = [];
+  const tx = {
+    workflow: {
+      findUnique: async () => ({ id: "wf1" }),
+      delete: async () => {
+        order.push("workflow");
+      }
+    },
+    run: {
+      deleteMany: async () => {
+        order.push("runs");
+      }
+    },
+    workflowVersion: {
+      deleteMany: async () => {
+        order.push("versions");
+      }
+    }
+  };
+  const prisma = {
+    $transaction: async (fn: any) => fn(tx)
+  } as any;
+
+  await deleteWorkflow(prisma, "wf1");
+  assert.deepEqual(order, ["runs", "versions", "workflow"]);
 });

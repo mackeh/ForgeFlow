@@ -9,6 +9,7 @@ import { startWebRecorder, attachRecorderWs } from "./lib/recorder.js";
 import { startRun } from "./lib/runner.js";
 import { startDesktopRecording, stopDesktopRecording } from "./lib/agent.js";
 import {
+  deleteWorkflow,
   getWorkflowDefinitionForRun,
   publishWorkflow,
   rollbackWorkflow,
@@ -148,6 +149,15 @@ app.post("/api/workflows/:id/rollback", async (req, res) => {
     res.json(rolled);
   } catch (error) {
     res.status(400).json({ error: String(error) });
+  }
+});
+
+app.delete("/api/workflows/:id", async (req, res) => {
+  try {
+    await deleteWorkflow(prisma, req.params.id);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(404).json({ error: String(error) });
   }
 });
 

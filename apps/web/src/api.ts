@@ -8,6 +8,10 @@ export function setToken(token: string) {
   localStorage.setItem("token", token);
 }
 
+export function clearToken() {
+  localStorage.removeItem("token");
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -52,6 +56,12 @@ export function updateWorkflow(id: string, payload: { name?: string; definition?
   return request(`/api/workflows/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
+  });
+}
+
+export function deleteWorkflow(id: string) {
+  return request(`/api/workflows/${id}`, {
+    method: "DELETE"
   });
 }
 

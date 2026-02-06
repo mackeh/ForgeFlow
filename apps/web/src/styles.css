@@ -61,6 +61,17 @@ body {
   cursor: pointer;
 }
 
+.sidebar button.secondary {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.sidebar button.danger {
+  background: #d64e3a;
+  color: #fff;
+}
+
 .search {
   background: var(--panel-2);
   border: 1px solid var(--border);

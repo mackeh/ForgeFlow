@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -14,7 +14,9 @@ import "reactflow/dist/style.css";
 import {
   API_URL,
   approveRun,
+  clearToken,
   createWorkflow,
+  deleteWorkflow,
   getRun,
   getRunDiff,
   getSecrets,
@@ -75,6 +77,7 @@ export default function App() {
   const [workflowName, setWorkflowName] = useState("");
 
   const nodesRef = useRef<Node[]>(nodes);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -123,10 +126,10 @@ export default function App() {
     return () => clearInterval(timer);
   }, [activeRun?.id, activeRun?.status]);
 
-  async function refreshWorkflows() {
+  async function refreshWorkflows(forceSelectFirst = false) {
     const data = await getWorkflows();
     setWorkflowList(data);
-    if (!activeWorkflow && data.length) {
+    if ((forceSelectFirst || !activeWorkflow) && data.length) {
       await selectWorkflow(data[0]);
     }
   }
@@ -175,6 +178,21 @@ export default function App() {
     const created = await createWorkflow({ name, definition: defaultDefinition });
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
+  };
+
+  const handleLogout = () => {
+    clearToken();
+    setToken(null);
+    setActiveWorkflow(null);
+    setWorkflowList([]);
+    setRuns([]);
+    setActiveRun(null);
+    setRunDiff(null);
+    setVersions([]);
+    setSecrets([]);
+    setNodes(defaultDefinition.nodes as Node[]);
+    setEdges(defaultDefinition.edges as Edge[]);
+    setStatus("");
   };
 
   const handleSave = async () => {
@@ -341,6 +359,69 @@ export default function App() {
     setStatus("Workflow renamed");
   };
 
+  const handleDeleteWorkflow = async () => {
+    if (!activeWorkflow) return;
+    const ok = window.confirm(`Delete workflow "${activeWorkflow.name}" and all of its runs?`);
+    if (!ok) return;
+    await deleteWorkflow(activeWorkflow.id);
+    setActiveWorkflow(null);
+    setNodes(defaultDefinition.nodes as Node[]);
+    setEdges(defaultDefinition.edges as Edge[]);
+    setRuns([]);
+    setActiveRun(null);
+    setRunDiff(null);
+    setVersions([]);
+    setRollbackVersion("");
+    await refreshWorkflows(true);
+    setStatus("Workflow deleted");
+  };
+
+  const handleSaveWorkflowFile = () => {
+    if (!activeWorkflow) {
+      setStatus("Select a workflow first");
+      return;
+    }
+    const payload = {
+      name: workflowName.trim() || activeWorkflow.name,
+      definition: buildCurrentDefinition(),
+      exportedAt: new Date().toISOString()
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeName = (payload.name || "workflow").replace(/[^a-z0-9-_]+/gi, "_");
+    a.href = url;
+    a.download = `${safeName}.workflow.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`Workflow exported: ${a.download}`);
+  };
+
+  const handleLoadWorkflowClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleLoadWorkflowFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const raw = await file.text();
+    const parsed = JSON.parse(raw);
+    const definition = parsed?.definition ?? parsed;
+    const validDefinition =
+      definition && typeof definition === "object" && Array.isArray(definition.nodes) && Array.isArray(definition.edges);
+    if (!validDefinition) {
+      throw new Error("Invalid workflow file: expected { definition: { nodes, edges } }");
+    }
+    const importedNameBase = String(parsed?.name || file.name.replace(/\.workflow\.json$|\.json$/i, "") || "Imported Workflow");
+    const importedName = importedNameBase.trim() || "Imported Workflow";
+    const created = await createWorkflow({ name: importedName, definition });
+    setWorkflowList((list) => [created, ...list]);
+    await selectWorkflow(created);
+    setStatus(`Workflow loaded from ${file.name}`);
+  };
+
   const buildCurrentDefinition = () => {
     const existing = activeWorkflow?.draftDefinition || activeWorkflow?.definition || defaultDefinition;
     return {
@@ -391,6 +472,14 @@ export default function App() {
         <h3>Workflow</h3>
         <input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="Workflow name" />
         <button onClick={() => handleRenameWorkflow().catch((err) => setStatus(err.message))}>Rename</button>
+        <button onClick={handleSaveWorkflowFile}>Save Workflow File</button>
+        <button onClick={() => handleLoadWorkflowClick()}>Load Workflow File</button>
+        <button className="danger" onClick={() => handleDeleteWorkflow().catch((err) => setStatus(err.message))}>
+          Delete Workflow
+        </button>
+        <button className="secondary" onClick={handleLogout}>
+          Logout
+        </button>
         <h3>Versions</h3>
         <select
           value={rollbackVersion}
@@ -417,6 +506,13 @@ export default function App() {
       </Sidebar>
 
       <div className="canvas">
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,.workflow.json,application/json"
+          style={{ display: "none" }}
+          onChange={(event) => handleLoadWorkflowFile(event).catch((err) => setStatus(err.message))}
+        />
         <div className="toolbar">
           <div className="toolbar-left">
             {nodeOptions.map((opt) => (
