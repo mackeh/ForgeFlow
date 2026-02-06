@@ -62,7 +62,11 @@ import { Inspector } from "./components/Inspector";
 
 const nodeTypes = { action: ActionNode };
 type ToastLevel = "info" | "success" | "error";
-type Toast = { id: number; message: string; level: ToastLevel };
+type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+type Toast = { id: number; message: string; level: ToastLevel; action?: ToastAction };
 type UiLogEntry = {
   id: number;
   at: string;
@@ -275,9 +279,9 @@ export default function App() {
     };
   }, [token, selectedNode, activeWorkflow, nodes, edges]);
 
-  const pushToast = (message: string, level: ToastLevel = "info") => {
+  const pushToast = (message: string, level: ToastLevel = "info", action?: ToastAction) => {
     const id = toastIdRef.current++;
-    setToasts((prev) => [...prev, { id, message, level }]);
+    setToasts((prev) => [...prev, { id, message, level, action }]);
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 3500);
@@ -311,10 +315,10 @@ export default function App() {
     };
   }, []);
 
-  const setFeedback = (message: string, level: ToastLevel = "info") => {
+  const setFeedback = (message: string, level: ToastLevel = "info", action?: ToastAction) => {
     setStatus(message);
     pushUiLog(message, level);
-    pushToast(message, level);
+    pushToast(message, level, action);
   };
 
   const showError = (error: unknown) => {
@@ -509,7 +513,12 @@ export default function App() {
       return;
     }
     const run = await startRun(activeWorkflow.id, { testMode, resumeFromRunId });
-    setFeedback(testMode ? "Test run started" : "Run started", "success");
+    setFeedback(testMode ? "Test run started" : "Run started", "success", {
+      label: "View Run",
+      onClick: () => {
+        void loadRun(run.id).catch(showError);
+      }
+    });
     await refreshWorkflowMeta(activeWorkflow.id);
     await loadRun(run.id);
     await refreshDashboard();
@@ -1473,7 +1482,18 @@ export default function App() {
         <div className="toast-stack">
           {toasts.map((toast) => (
             <div key={toast.id} className={`toast toast-${toast.level}`}>
-              {toast.message}
+              <span>{toast.message}</span>
+              {toast.action ? (
+                <button
+                  className="toast-action"
+                  onClick={() => {
+                    toast.action?.onClick();
+                    setToasts((prev) => prev.filter((item) => item.id !== toast.id));
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              ) : null}
             </div>
           ))}
         </div>

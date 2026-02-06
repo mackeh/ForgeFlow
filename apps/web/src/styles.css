@@ -366,6 +366,11 @@ button.is-loading {
   font-size: 12px;
   box-shadow: var(--shadow);
   background: rgba(18, 27, 35, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  animation: toastSlideIn 220ms ease-out;
 }
 
 .toast-success {
@@ -378,6 +383,31 @@ button.is-loading {
 
 .toast-info {
   border-color: rgba(245, 139, 31, 0.55);
+}
+
+.toast-action {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  border-color: rgba(44, 185, 176, 0.6);
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .run-drawer {
