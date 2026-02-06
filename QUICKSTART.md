@@ -1,49 +1,43 @@
 # ForgeFlow Quick Start Manual
 
-This guide gets you from zero to a working automation quickly.
+This guide gets a single-user local setup running fast and shows the main workflow path.
 
-## 1. Start the app
+## 1. Start the platform
 
-From the project root:
+From project root:
 
 ```bash
 ./start.sh
 ```
 
-What this does:
-- Creates `.env` from `.env.example` (if missing)
-- Auto-updates images/dependencies (unless `AUTO_UPDATE=0`)
-- Attempts `xhost +local:` for desktop automation (unless `AUTO_X11_AUTH=0`)
+What `start.sh` does:
+- Creates `.env` from `.env.example` if missing
+- Tries `xhost +local:` for desktop automation unless `AUTO_X11_AUTH=0`
 - Runs DB migration
-- Starts all services
+- Starts all services with Docker Compose
+- Auto-updates images/rebuilds unless `AUTO_UPDATE=0`
 
-Open the UI:
+Open UI:
 - `http://localhost:5173`
 
-## 2. Login
+## 2. Log in
 
-Use values from `.env`:
+Credentials come from `.env`:
 - `APP_USERNAME`
 - `APP_PASSWORD`
 
-Default values (if unchanged):
+Default values:
 - Username: `local`
 - Password: `localpass`
 
 ## 3. Create your first workflow
 
 1. Click `New` in the left sidebar.
-2. Add nodes from the top toolbar (`+ HTTP Request`, `+ Web Navigate`, etc.).
-3. Select a node and use `Quick Edit` fields in the right `Inspector` for common settings.
-4. Use JSON in the inspector for advanced settings.
+2. Add nodes from the top toolbar.
+3. Select each node and configure fields in `Inspector`.
 4. Click `Save Draft`.
 
-Tips:
-- Use `Auto Layout` in the toolbar to re-arrange overlapping nodes.
-- Toggle `Snap: On/Off` for grid snapping while dragging.
-
-### Recommended first node chain
-
+Recommended first chain:
 1. `start`
 2. `playwright_navigate`
 3. `playwright_fill`
@@ -51,90 +45,98 @@ Tips:
 5. `playwright_extract`
 6. `submit_guard`
 
-## 4. Record actions
+Tips:
+- Use `Auto Layout` to reorganize nodes quickly.
+- Use `Snap: On/Off` depending on precision vs free placement.
+- Use `Ctrl+S` save, `Ctrl+T` test run, `Ctrl+R` run.
 
-### Web recorder
+## 4. Run lifecycle (test, publish, production)
+
+1. `Save Draft`
+2. `Test Run` (runs draft definition)
+3. `Publish` (promotes draft)
+4. `Run` (runs published definition)
+
+If a run fails:
+- Use `Resume From Failed Run` to continue from checkpoint when available.
+- Use `Diff vs Last Success` to inspect behavior changes.
+
+If a run pauses at `manual_approval`:
+- Click `Approve Waiting Node` in run controls.
+
+## 5. Use recording
+
+### Web recording
 1. Click `Record Web`.
-2. Perform actions in the opened browser.
-3. Recorded click/fill nodes are added to the graph.
+2. Perform actions in recorder browser.
+3. Recorded steps are added to the graph.
 
-### Desktop recorder
+### Desktop recording
 1. Click `Record Desktop`.
 2. Perform desktop actions.
 3. Click `Stop Desktop`.
-4. Recorded desktop nodes are added (with image targets and confidence).
+4. Recorded desktop nodes are added (image target + confidence).
 
-Linux note for desktop automation:
-- Run `xhost +local:`
-- Ensure `DISPLAY` is set in `.env` (usually `:0`)
+Linux note:
+```bash
+xhost +local:
+```
+- Ensure `.env` has correct `DISPLAY` (usually `:0`).
 
-## 5. Test and publish
+## 6. Use templates
 
-1. Click `Save Draft`.
-2. Click `Test Run` to run draft definition.
-3. Click `Publish` when stable.
-4. Click `Run` for production run (published definition).
+1. Open `Templates` in the left panel.
+2. Search or filter by category.
+3. Select a template and click `Create From Template`.
 
-## 6. Use secrets safely
+## 7. Configure schedules (local time)
 
-In the left panel (`Secrets`):
-1. Enter secret key/value.
+1. Open `Schedules` section.
+2. Choose a preset, click `Use Preset`, or type your own cron.
+3. Set timezone.
+4. Verify `Next run` preview.
+5. Click `Add Schedule`.
+
+Schedule management:
+- `Run now`
+- `Enable`/`Disable`
+- `Delete`
+- Card shows last run time/status/error
+
+## 8. Secrets and LLM transforms
+
+Add secrets:
+1. Enter key/value in `Secrets` panel.
 2. Click `Save Secret`.
 
-Use secrets in node fields with:
+Reference secret in node fields:
 - `{{secret:MY_KEY}}`
 
-Example:
-- API header value: `Bearer {{secret:CRM_TOKEN}}`
+Use local LLM transform node:
+- Add `transform_llm`
+- Map `inputKey` and `outputKey`
+- Ensure Ollama is up and model is pulled
 
-## 7. Use templates, schedules, and dashboard
-
-- In `Templates`, pick a starter workflow and click `Create From Template`.
-- In `Schedules`, use a local-time cron expression (for example `0 9 * * *`) and click `Add Schedule`.
-- The metrics strip shows success rate, total runs, average duration, active schedules, and local server time.
-
-## 8. Handle approvals and failures
-
-- If a `manual_approval` node pauses execution, run status becomes `WAITING_APPROVAL`.
-- In run timeline, click `Approve Waiting Node` to continue.
-- If run fails, click `Resume From Failed Run` to continue from checkpoint.
-- Use `Diff vs Last Success` to compare behavior changes.
-
-## 9. Multi-user, RBAC, and webhooks (admin)
-
-Admin users can manage:
-- `Users`: create/disable/delete local users and rotate roles.
-- `RBAC`: update role permission sets.
-- `Webhooks`: subscribe external endpoints to run events.
-
-Supported webhook events:
-- `run.started`
-- `run.succeeded`
-- `run.failed`
-- `run.waiting_approval`
-
-## 10. Node types you should use often
-
-- `validate_record`: required fields and regex checks
-- `submit_guard`: JSON schema check before submit
-- `transform_llm`: cleanup/normalize data via local Ollama model
-- `manual_approval`: stop and require user approval before critical actions
-
-## 11. Local LLM setup
-
-Pull a model (once):
+Pull model once:
 
 ```bash
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
 
-## 12. Useful maintenance commands
+## 9. Admin features
 
-Rebuild and start:
+For admin users:
+- Manage users (create/disable/delete)
+- Update role permissions
+- Manage webhook subscriptions
 
-```bash
-./start.sh
-```
+Common webhook events:
+- `run.started`
+- `run.succeeded`
+- `run.failed`
+- `run.waiting_approval`
+
+## 10. Useful commands
 
 Start without auto-update:
 
@@ -142,10 +144,16 @@ Start without auto-update:
 AUTO_UPDATE=0 ./start.sh
 ```
 
-Tune API rate limits (optional):
+Tune rate limits:
 
 ```bash
 RATE_LIMIT_WINDOW_MS=900000 RATE_LIMIT_MAX=300 RATE_LIMIT_LOGIN_MAX=25 ./start.sh
+```
+
+Show logs:
+
+```bash
+docker compose logs -f
 ```
 
 Stop all services:
@@ -154,32 +162,29 @@ Stop all services:
 docker compose down
 ```
 
-If dependencies changed and a service still fails with `module not found`, recreate anonymous volumes:
+Rebuild clean container node modules (fix module errors):
 
 ```bash
 docker compose up --build --renew-anon-volumes
 ```
 
-View logs:
+## 11. Troubleshooting
 
+Login fails:
+- Verify `APP_USERNAME` and `APP_PASSWORD` in `.env`.
+- If using `APP_PASSWORD_HASH_ARGON2`, use the original plaintext password to log in.
+
+Desktop actions fail:
+- Confirm `xhost +local:`
+- Confirm `DISPLAY` in `.env`
+- Re-record image-based steps if UI/theme changed
+
+Port conflict on Ollama (`11434`):
+- Stop conflicting host service or change mapping in `docker-compose.yml`.
+
+Workflow appears stuck:
+- Check in-app log window and toast errors
+- Check backend logs:
 ```bash
-docker compose logs -f
+docker compose logs -f server agent
 ```
-
-## 13. Common troubleshooting
-
-### Port conflict
-- Run `docker compose down` and retry.
-- If conflict persists, check other running services on same ports.
-
-### Login fails
-- Check `.env` values for `APP_USERNAME` and `APP_PASSWORD`.
-- If using `APP_PASSWORD_HASH_ARGON2`, use the original plaintext password.
-
-### Desktop nodes fail to find targets
-- Lower/adjust `confidence` in node data.
-- Re-record click images if screen/theme/layout changed.
-
-### LLM transform fails
-- Ensure Ollama container is up.
-- Ensure the selected model is pulled (see section 9).
