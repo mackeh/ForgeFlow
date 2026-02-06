@@ -70,6 +70,37 @@ function quickFieldsForType(nodeType: string): QuickField[] {
           ]
         }
       ];
+    case "conditional_branch":
+      return [
+        { key: "inputKey", label: "Input Key" },
+        {
+          key: "operator",
+          label: "Operator",
+          type: "select",
+          options: [
+            { label: "truthy", value: "truthy" },
+            { label: "falsy", value: "falsy" },
+            { label: "eq", value: "eq" },
+            { label: "ne", value: "ne" },
+            { label: "gt", value: "gt" },
+            { label: "gte", value: "gte" },
+            { label: "lt", value: "lt" },
+            { label: "lte", value: "lte" },
+            { label: "contains", value: "contains" },
+            { label: "in", value: "in" }
+          ]
+        },
+        { key: "right", label: "Right Value" },
+        { key: "trueTarget", label: "True Target Node ID" },
+        { key: "falseTarget", label: "False Target Node ID" }
+      ];
+    case "loop_iterate":
+      return [
+        { key: "inputKey", label: "Input Array Key" },
+        { key: "itemKey", label: "Item Key" },
+        { key: "indexKey", label: "Index Key" },
+        { key: "outputKey", label: "Output Key" }
+      ];
     case "desktop_click_image":
       return [
         { key: "imagePath", label: "Image Path" },

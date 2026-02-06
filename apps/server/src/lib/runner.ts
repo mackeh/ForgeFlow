@@ -30,6 +30,8 @@ type ExecutionContext = {
   [key: string]: unknown;
   __approvals?: Record<string, boolean>;
   __validationCache?: Record<string, boolean>;
+  __branches?: Record<string, { result: boolean; targetId?: string; evaluatedAt: string }>;
+  __loopMeta?: Record<string, { count: number; itemKey: string; indexKey: string; outputKey: string }>;
 };
 
 type ExecutionDefaults = {
@@ -112,6 +114,9 @@ export async function startRun(prisma: PrismaClient, runId: string) {
   });
 
   const graph = buildGraph(nodes, edges);
+  const nodesById: Map<string, any> = new Map(
+    nodes.map((node: any) => [String(node.id), node] as [string, any])
+  );
   let browser: Browser | null = null;
   let page: Page | null = null;
   let checkpointNodeId: string | null = run.checkpointNodeId || null;
@@ -147,6 +152,21 @@ export async function startRun(prisma: PrismaClient, runId: string) {
 
         const waitingPredecessor = predecessorStates.some((s) => s === "queued" || s === "running");
         if (waitingPredecessor) continue;
+
+        if (shouldSkipByConditionalBranch(node.id, graph, nodesById, nodeStates, context)) {
+          state.status = "skipped";
+          state.finishedAt = new Date().toISOString();
+          logs.push(logEvent(node.id, nodeType(node), "skipped", { reason: "branch_not_selected" }));
+          progressed = true;
+          await persistRunState(prisma, run.id, {
+            nodeStates,
+            context,
+            logs,
+            artifacts,
+            checkpointNodeId
+          });
+          continue;
+        }
 
         if (predecessorStates.some((s) => s === "failed" || s === "skipped")) {
           state.status = "skipped";
@@ -476,6 +496,40 @@ async function executeNode(args: {
       }
       if (approvals[node.id]) return {};
       throw new ApprovalRequiredError(node.id, node.data?.message || "Manual approval required");
+    }
+    case "conditional_branch": {
+      const left = resolveConditionalOperand(node.data, context);
+      const right = node.data?.right;
+      const operator = String(node.data?.operator || "truthy");
+      const result = evaluateCondition(left, right, operator);
+      const targetId = result ? asNonEmptyString(node.data?.trueTarget) : asNonEmptyString(node.data?.falseTarget);
+      context.__branches = context.__branches || {};
+      context.__branches[node.id] = {
+        result,
+        targetId: targetId || undefined,
+        evaluatedAt: new Date().toISOString()
+      };
+      if (node.data?.outputKey) {
+        context[String(node.data.outputKey)] = result;
+      }
+      return { outputKey: node.data?.outputKey };
+    }
+    case "loop_iterate": {
+      const inputKey = String(node.data?.inputKey || "");
+      if (!inputKey) throw new Error("loop_iterate missing inputKey");
+      const value = context[inputKey];
+      if (!Array.isArray(value)) {
+        throw new Error(`loop_iterate expected array at context.${inputKey}`);
+      }
+      const itemKey = String(node.data?.itemKey || "loopItem");
+      const indexKey = String(node.data?.indexKey || "loopIndex");
+      const outputKey = String(node.data?.outputKey || `${inputKey}_items`);
+      context[outputKey] = value;
+      context[itemKey] = value.length ? value[0] : null;
+      context[indexKey] = value.length ? 0 : -1;
+      context.__loopMeta = context.__loopMeta || {};
+      context.__loopMeta[node.id] = { count: value.length, itemKey, indexKey, outputKey };
+      return { outputKey };
     }
     case "playwright_navigate": {
       const headless = resolvePlaywrightHeadless(node, executionDefaults);
@@ -866,20 +920,28 @@ function initNodeStates(nodes: any[], existing: unknown) {
 function buildGraph(nodes: any[], edges: any[]) {
   const predecessors: Record<string, string[]> = {};
   const successors: Record<string, string[]> = {};
+  const incomingEdges: Record<string, any[]> = {};
+  const outgoingEdges: Record<string, any[]> = {};
 
   for (const node of nodes) {
     predecessors[node.id] = [];
     successors[node.id] = [];
+    incomingEdges[node.id] = [];
+    outgoingEdges[node.id] = [];
   }
 
   for (const edge of edges) {
     if (!predecessors[edge.target]) predecessors[edge.target] = [];
     if (!successors[edge.source]) successors[edge.source] = [];
+    if (!incomingEdges[edge.target]) incomingEdges[edge.target] = [];
+    if (!outgoingEdges[edge.source]) outgoingEdges[edge.source] = [];
     predecessors[edge.target].push(edge.source);
     successors[edge.source].push(edge.target);
+    incomingEdges[edge.target].push(edge);
+    outgoingEdges[edge.source].push(edge);
   }
 
-  return { predecessors, successors };
+  return { predecessors, successors, incomingEdges, outgoingEdges };
 }
 
 async function persistRunState(
@@ -938,6 +1000,93 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldSkipByConditionalBranch(
+  nodeId: string,
+  graph: {
+    incomingEdges: Record<string, any[]>;
+  },
+  nodesById: Map<string, any>,
+  nodeStates: Record<string, NodeState>,
+  context: ExecutionContext
+) {
+  const incomingEdges = graph.incomingEdges[nodeId] || [];
+  if (!incomingEdges.length) return false;
+
+  let explicitlySelected = false;
+  let explicitlyRejected = false;
+
+  for (const edge of incomingEdges) {
+    const sourceNode = nodesById.get(edge.source);
+    if (!sourceNode || nodeType(sourceNode) !== "conditional_branch") continue;
+    const sourceState = nodeStates[edge.source]?.status;
+    if (sourceState !== "succeeded") continue;
+
+    const decision = context.__branches?.[edge.source];
+    if (!decision) continue;
+    const selectedTarget = asNonEmptyString(decision.targetId);
+    if (selectedTarget) {
+      if (selectedTarget === edge.target) explicitlySelected = true;
+      else explicitlyRejected = true;
+      continue;
+    }
+
+    if (edge?.data && typeof edge.data === "object" && "when" in edge.data) {
+      const edgeWhen = asBooleanOrNull((edge.data as Record<string, unknown>).when);
+      if (edgeWhen === null) continue;
+      if (edgeWhen === decision.result) explicitlySelected = true;
+      else explicitlyRejected = true;
+    }
+  }
+
+  return explicitlyRejected && !explicitlySelected;
+}
+
+function resolveConditionalOperand(nodeData: any, context: ExecutionContext) {
+  if (nodeData?.inputKey) {
+    return context[String(nodeData.inputKey)];
+  }
+  if (nodeData?.leftKey) {
+    return context[String(nodeData.leftKey)];
+  }
+  return nodeData?.left;
+}
+
+function asNonEmptyString(value: unknown) {
+  const text = String(value || "").trim();
+  return text || "";
+}
+
+function asBooleanOrNull(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lowered = value.trim().toLowerCase();
+    if (lowered === "true") return true;
+    if (lowered === "false") return false;
+  }
+  return null;
+}
+
+export function evaluateCondition(left: unknown, right: unknown, operator: string) {
+  const op = operator.toLowerCase();
+  if (op === "truthy") return Boolean(left);
+  if (op === "falsy") return !left;
+  if (op === "eq" || op === "equals") return left === right;
+  if (op === "ne" || op === "not_equals") return left !== right;
+  if (op === "gt") return Number(left) > Number(right);
+  if (op === "gte") return Number(left) >= Number(right);
+  if (op === "lt") return Number(left) < Number(right);
+  if (op === "lte") return Number(left) <= Number(right);
+  if (op === "contains") {
+    if (Array.isArray(left)) return left.includes(right);
+    return String(left ?? "").includes(String(right ?? ""));
+  }
+  if (op === "in") {
+    if (!Array.isArray(right)) return false;
+    return right.includes(left);
+  }
+  return Boolean(left);
 }
 
 function toJson(value: unknown) {

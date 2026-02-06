@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSelectorCandidates, orderNodes, resolvePlaywrightHeadless } from "./runner.js";
+import { buildSelectorCandidates, evaluateCondition, orderNodes, resolvePlaywrightHeadless } from "./runner.js";
 
 test("orderNodes returns all nodes even with cycle", () => {
   const definition = {
@@ -43,4 +43,13 @@ test("resolvePlaywrightHeadless prefers node override, then workflow defaults, t
 
   process.env.PLAYWRIGHT_HEADLESS = "false";
   assert.equal(resolvePlaywrightHeadless({ data: {} }, {}), false);
+});
+
+test("evaluateCondition supports branch operators", () => {
+  assert.equal(evaluateCondition(true, undefined, "truthy"), true);
+  assert.equal(evaluateCondition(false, undefined, "falsy"), true);
+  assert.equal(evaluateCondition(10, 5, "gt"), true);
+  assert.equal(evaluateCondition(5, 5, "eq"), true);
+  assert.equal(evaluateCondition("abc", "b", "contains"), true);
+  assert.equal(evaluateCondition("x", ["a", "x"], "in"), true);
 });
