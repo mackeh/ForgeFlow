@@ -229,6 +229,14 @@ export default function App() {
 
   const showError = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error || "Unknown error");
+    if (
+      message.includes("Missing token") ||
+      message.includes("Invalid token") ||
+      message.includes("Invalid token payload")
+    ) {
+      clearToken();
+      setToken(null);
+    }
     setFeedback(message, "error");
   };
 

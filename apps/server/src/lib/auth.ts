@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
-import { resolvePermissionsForRole, verifyUserCredentials } from "./authzStore.js";
+import { getUserByUsername, resolvePermissionsForRole, verifyUserCredentials } from "./authzStore.js";
 
 const jwtSecret = process.env.JWT_SECRET || "dev_secret";
 const failedAttempts = new Map<string, { count: number; lockUntil: number }>();
@@ -9,7 +9,7 @@ const lockMs = Number(process.env.AUTH_LOCK_MS || 5 * 60 * 1000);
 
 export type AuthTokenPayload = {
   username: string;
-  role: string;
+  role?: string;
 };
 
 export type AuthContext = {
@@ -29,26 +29,18 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     res.status(401).json({ error: "Missing token" });
     return;
   }
-  try {
-    const decoded = jwt.verify(token, jwtSecret) as AuthTokenPayload;
-    const username = String(decoded?.username || "").trim();
-    const role = String(decoded?.role || "").trim();
-    if (!username || !role) {
-      res.status(401).json({ error: "Invalid token payload" });
-      return;
-    }
-
-    resolvePermissionsForRole(role)
-      .then((permissions) => {
-        (req as any).auth = { username, role, permissions } satisfies AuthContext;
-        next();
-      })
-      .catch((error) => {
-        res.status(401).json({ error: String(error) });
-      });
-  } catch (_err) {
-    res.status(401).json({ error: "Invalid token" });
-  }
+  resolveAuthContextFromToken(token)
+    .then((auth) => {
+      if (!auth) {
+        res.status(401).json({ error: "Invalid token payload" });
+        return;
+      }
+      (req as any).auth = auth;
+      next();
+    })
+    .catch(() => {
+      res.status(401).json({ error: "Invalid token" });
+    });
 }
 
 export function requirePermission(permission: string) {
@@ -108,4 +100,20 @@ export function decodeTokenForTests(token: string) {
   } catch {
     return null;
   }
+}
+
+export async function resolveAuthContextFromToken(token: string) {
+  const decoded = jwt.verify(token, jwtSecret) as AuthTokenPayload;
+  const username = String(decoded?.username || "").trim();
+  if (!username) return null;
+
+  let role = String(decoded?.role || "").trim();
+  if (!role) {
+    const user = await getUserByUsername(username);
+    role = String(user?.role || "").trim();
+  }
+  if (!role) return null;
+
+  const permissions = await resolvePermissionsForRole(role);
+  return { username, role, permissions } satisfies AuthContext;
 }

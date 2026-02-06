@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { rm } from "node:fs/promises";
-import { decodeTokenForTests, resetAuthStateForTests, signToken, verifyLogin } from "./auth.js";
+import jwt from "jsonwebtoken";
+import { decodeTokenForTests, resetAuthStateForTests, resolveAuthContextFromToken, signToken, verifyLogin } from "./auth.js";
 
 async function resetAuthzFileForTest(testId: string) {
   const file = path.join(os.tmpdir(), `forgeflow-authz-${testId}.json`);
@@ -42,4 +43,13 @@ test("signToken encodes username and role", () => {
   const decoded = decodeTokenForTests(token);
   assert.equal(decoded?.username, "alice");
   assert.equal(decoded?.role, "operator");
+});
+
+test("legacy username-only token resolves role from local authz store", async () => {
+  await resetAuthzFileForTest("legacy-token");
+  const token = jwt.sign({ username: "local" }, process.env.JWT_SECRET || "dev_secret", { expiresIn: "12h" });
+  const auth = await resolveAuthContextFromToken(token);
+  assert.equal(auth?.username, "local");
+  assert.equal(auth?.role, "admin");
+  assert.equal(Array.isArray(auth?.permissions), true);
 });
