@@ -348,3 +348,191 @@ test("parallel_execute fails run when any task fails and allowPartial is false",
   assert.equal(finished?.nodeStates?.parallel?.status, "failed");
   assert.equal(String(finished?.nodeStates?.parallel?.error || "").includes("parallel_execute failed"), true);
 });
+
+test("conditional_branch routes execution to matching target and skips other branch", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      { id: "set-amount", data: { type: "set_variable", key: "amount", value: 9 } },
+      {
+        id: "branch",
+        data: {
+          type: "conditional_branch",
+          inputKey: "amount",
+          operator: "gt",
+          right: 5,
+          trueTarget: "path-approved",
+          falseTarget: "path-rejected",
+          outputKey: "isApproved"
+        }
+      },
+      { id: "path-approved", data: { type: "set_variable", key: "route", value: "approved" } },
+      { id: "path-rejected", data: { type: "set_variable", key: "route", value: "rejected" } }
+    ],
+    [
+      { id: "e-start-amount", source: "start", target: "set-amount" },
+      { id: "e-amount-branch", source: "set-amount", target: "branch" },
+      { id: "e-branch-yes", source: "branch", target: "path-approved" },
+      { id: "e-branch-no", source: "branch", target: "path-rejected" }
+    ]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({ id: "run-branch", testMode: true })
+  });
+
+  await startRun(harness.prisma, "run-branch");
+  const finished = harness.getRun("run-branch");
+
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(finished?.context?.isApproved, true);
+  assert.equal(finished?.context?.route, "approved");
+  assert.equal(finished?.nodeStates?.["path-approved"]?.status, "succeeded");
+  assert.equal(finished?.nodeStates?.["path-rejected"]?.status, "skipped");
+});
+
+test("loop_iterate executes inline tasks for each array item and stores summary", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "loop",
+        data: {
+          type: "loop_iterate",
+          inputKey: "records",
+          itemKey: "record",
+          indexKey: "recordIdx",
+          outputKey: "loopSummary",
+          tasks: [
+            {
+              id: "check-record",
+              type: "submit_guard",
+              inputKey: "record",
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["name"],
+                properties: {
+                  name: { type: "string" }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    [{ id: "e-start-loop", source: "start", target: "loop" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({
+      id: "run-loop",
+      testMode: true,
+      inputData: {
+        records: [{ name: "one" }, { name: "two" }]
+      }
+    })
+  });
+
+  await startRun(harness.prisma, "run-loop");
+  const finished = harness.getRun("run-loop");
+
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(Array.isArray(finished?.context?.loopSummary), true);
+  assert.equal(finished?.context?.loopSummary?.length, 2);
+  assert.equal(finished?.context?.loopSummary?.[0]?.status, "succeeded");
+  assert.equal(finished?.context?.loopSummary?.[1]?.status, "succeeded");
+  assert.equal(finished?.context?.recordIdx, 1);
+  assert.equal(finished?.context?.__loopMeta?.loop?.count, 2);
+});
+
+test("loop_iterate allowPartial keeps run successful when a task fails", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "loop",
+        data: {
+          type: "loop_iterate",
+          inputKey: "records",
+          itemKey: "record",
+          outputKey: "loopSummary",
+          allowPartial: true,
+          tasks: [
+            {
+              id: "check-record",
+              type: "submit_guard",
+              inputKey: "record",
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["name"],
+                properties: {
+                  name: { type: "string" }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    [{ id: "e-start-loop", source: "start", target: "loop" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({
+      id: "run-loop-partial",
+      testMode: true,
+      inputData: {
+        records: [{ name: "valid" }, {}]
+      }
+    })
+  });
+
+  await startRun(harness.prisma, "run-loop-partial");
+  const finished = harness.getRun("run-loop-partial");
+
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(Array.isArray(finished?.context?.loopSummary), true);
+  assert.equal(finished?.context?.loopSummary?.length, 2);
+  assert.equal(finished?.context?.loopSummary?.[0]?.status, "succeeded");
+  assert.equal(finished?.context?.loopSummary?.[1]?.status, "failed");
+});
+
+test("parallel_execute allowPartial keeps node successful and records failures", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "parallel",
+        data: {
+          type: "parallel_execute",
+          outputKey: "parallelSummary",
+          allowPartial: true,
+          tasks: [
+            { id: "set-good", type: "set_variable", key: "alpha", value: "A" },
+            { id: "set-bad", type: "set_variable", value: "missing key" }
+          ]
+        }
+      }
+    ],
+    [{ id: "e-start-parallel", source: "start", target: "parallel" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({ id: "run-parallel-partial", testMode: true })
+  });
+
+  await startRun(harness.prisma, "run-parallel-partial");
+  const finished = harness.getRun("run-parallel-partial");
+  const summary = finished?.context?.parallelSummary || [];
+
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(finished?.context?.alpha, "A");
+  assert.equal(Array.isArray(summary), true);
+  assert.equal(summary.some((entry: any) => entry.status === "failed"), true);
+});

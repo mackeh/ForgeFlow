@@ -6,7 +6,8 @@ import {
   evaluateCondition,
   extractSelectorsFromAiResponse,
   orderNodes,
-  resolvePlaywrightHeadless
+  resolvePlaywrightHeadless,
+  selectorTextToCandidate
 } from "./runner.js";
 
 test("orderNodes returns all nodes even with cycle", () => {
@@ -40,6 +41,22 @@ test("buildSelectorCandidates creates prioritized strategies", () => {
   assert.deepEqual(list[0], { kind: "css", selector: "#one" });
   assert.equal(list.some((item) => item.kind === "role"), true);
   assert.equal(list.some((item) => item.kind === "xpath"), true);
+});
+
+test("buildSelectorCandidates parses mixed selector string formats", () => {
+  const list = buildSelectorCandidates({
+    selectors: ["text=Submit", "xpath=//button[@id='save']"],
+    selector: "role=button[name='Save']",
+    textHint: "Continue"
+  });
+
+  assert.deepEqual(list[0], { kind: "text", selector: "Submit" });
+  assert.deepEqual(list[1], { kind: "xpath", selector: "//button[@id='save']" });
+  assert.equal(
+    list.some((item) => item.kind === "role" && item.role === "button" && item.name === "Save"),
+    true
+  );
+  assert.equal(list.some((item) => item.kind === "text" && item.selector === "Continue"), true);
 });
 
 test("resolvePlaywrightHeadless prefers node override, then workflow defaults, then env", () => {
@@ -85,4 +102,25 @@ test("buildSelectorAiPrompt includes action context and hints", () => {
   assert.equal(prompt.includes("button.btn-primary"), true);
   assert.equal(prompt.includes("save-btn"), true);
   assert.equal(prompt.includes("Return ONLY JSON"), true);
+});
+
+test("selectorTextToCandidate parses css, text, and xpath forms", () => {
+  assert.deepEqual(selectorTextToCandidate("button.primary"), { kind: "css", selector: "button.primary" });
+  assert.deepEqual(selectorTextToCandidate("text=Submit"), { kind: "text", selector: "Submit" });
+  assert.deepEqual(selectorTextToCandidate("//button[@id='save']"), {
+    kind: "xpath",
+    selector: "//button[@id='save']"
+  });
+});
+
+test("selectorTextToCandidate parses role forms with optional name", () => {
+  assert.deepEqual(selectorTextToCandidate("role=button[name='Approve']"), {
+    kind: "role",
+    role: "button",
+    name: "Approve"
+  });
+  assert.deepEqual(selectorTextToCandidate("role=link"), {
+    kind: "role",
+    role: "link"
+  });
 });

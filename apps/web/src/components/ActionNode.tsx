@@ -10,8 +10,8 @@ export function ActionNode({ data }: any) {
   const runError = data?.__runError ? String(data.__runError) : "";
   const details: string[] = [];
   if (data?.selector) details.push(`Selector: ${data.selector}`);
-  if (data?.type === "desktop_click_image") {
-    const conf = data?.confidence ?? 0.8;
+  if (typeof data?.confidence === "number") {
+    const conf = data.confidence;
     details.push(`Match confidence: ${conf}`);
   }
   if (runError) {

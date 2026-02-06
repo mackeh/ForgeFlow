@@ -37,16 +37,33 @@ function quickFieldsForType(nodeType: string): QuickField[] {
     case "playwright_navigate":
       return [{ key: "url", label: "URL" }];
     case "playwright_click":
-      return [{ key: "selector", label: "Selector" }];
+      return [
+        { key: "selector", label: "Selector" },
+        { key: "textHint", label: "Text Hint" },
+        { key: "testId", label: "Test ID" },
+        { key: "ariaLabel", label: "Aria Label" },
+        { key: "xpath", label: "XPath" },
+        { key: "selectorModel", label: "Selector AI Model" }
+      ];
     case "playwright_fill":
       return [
         { key: "selector", label: "Selector" },
-        { key: "value", label: "Value" }
+        { key: "value", label: "Value" },
+        { key: "textHint", label: "Text Hint" },
+        { key: "testId", label: "Test ID" },
+        { key: "ariaLabel", label: "Aria Label" },
+        { key: "xpath", label: "XPath" },
+        { key: "selectorModel", label: "Selector AI Model" }
       ];
     case "playwright_extract":
       return [
         { key: "selector", label: "Selector" },
-        { key: "saveAs", label: "Save As" }
+        { key: "saveAs", label: "Save As" },
+        { key: "textHint", label: "Text Hint" },
+        { key: "testId", label: "Test ID" },
+        { key: "ariaLabel", label: "Aria Label" },
+        { key: "xpath", label: "XPath" },
+        { key: "selectorModel", label: "Selector AI Model" }
       ];
     case "transform_llm":
       return [
@@ -92,14 +109,25 @@ function quickFieldsForType(nodeType: string): QuickField[] {
         },
         { key: "right", label: "Right Value" },
         { key: "trueTarget", label: "True Target Node ID" },
-        { key: "falseTarget", label: "False Target Node ID" }
+        { key: "falseTarget", label: "False Target Node ID" },
+        { key: "outputKey", label: "Output Key" }
       ];
     case "loop_iterate":
       return [
         { key: "inputKey", label: "Input Array Key" },
         { key: "itemKey", label: "Item Key" },
         { key: "indexKey", label: "Index Key" },
-        { key: "outputKey", label: "Output Key" }
+        { key: "outputKey", label: "Output Key" },
+        { key: "taskTimeoutMs", label: "Task Timeout (ms)", type: "number" },
+        {
+          key: "allowPartial",
+          label: "Allow Partial Failures",
+          type: "select",
+          options: [
+            { label: "False", value: "false" },
+            { label: "True", value: "true" }
+          ]
+        }
       ];
     case "parallel_execute":
       return [

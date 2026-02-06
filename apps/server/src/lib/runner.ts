@@ -524,9 +524,76 @@ async function executeNode(args: {
       const itemKey = String(node.data?.itemKey || "loopItem");
       const indexKey = String(node.data?.indexKey || "loopIndex");
       const outputKey = String(node.data?.outputKey || `${inputKey}_items`);
-      context[outputKey] = value;
-      context[itemKey] = value.length ? value[0] : null;
-      context[indexKey] = value.length ? 0 : -1;
+      const tasks = Array.isArray(node.data?.tasks) ? node.data.tasks : [];
+      const allowPartial = Boolean(node.data?.allowPartial);
+      const taskTimeoutMs = Number(node.data?.taskTimeoutMs || 15_000);
+
+      if (!tasks.length) {
+        context[outputKey] = value;
+        context[itemKey] = value.length ? value[0] : null;
+        context[indexKey] = value.length ? 0 : -1;
+        context.__loopMeta = context.__loopMeta || {};
+        context.__loopMeta[node.id] = { count: value.length, itemKey, indexKey, outputKey };
+        return { outputKey };
+      }
+
+      const summary: Array<Record<string, unknown>> = [];
+      for (let idx = 0; idx < value.length; idx += 1) {
+        context[itemKey] = value[idx];
+        context[indexKey] = idx;
+
+        const taskResults: Array<Record<string, unknown>> = [];
+        for (let taskIdx = 0; taskIdx < tasks.length; taskIdx += 1) {
+          const task = tasks[taskIdx];
+          const taskId = String(task?.id || `task-${taskIdx + 1}`);
+          try {
+            const result = await withTimeout(
+              executeInlineTask({
+                task,
+                taskId,
+                prisma,
+                context,
+                testMode
+              }),
+              taskTimeoutMs,
+              `loop_iterate task ${taskId} timed out`
+            );
+            taskResults.push({
+              taskId: result.taskId,
+              taskType: result.taskType,
+              status: "succeeded",
+              outputKey: result.outputKey
+            });
+          } catch (error) {
+            const failure = {
+              taskId,
+              taskType: String(task?.type || "unknown"),
+              status: "failed",
+              error: String(error)
+            };
+            taskResults.push(failure);
+            if (!allowPartial) {
+              summary.push({
+                index: idx,
+                status: "failed",
+                tasks: taskResults
+              });
+              throw new Error(`loop_iterate failed at index ${idx}, task ${taskId}: ${String(error)}`);
+            }
+            break;
+          }
+        }
+
+        const hasFailure = taskResults.some((entry) => entry.status === "failed");
+        summary.push({
+          index: idx,
+          status: hasFailure ? "failed" : "succeeded",
+          tasks: taskResults
+        });
+      }
+      context[outputKey] = summary;
+      context[itemKey] = value.length ? value[value.length - 1] : null;
+      context[indexKey] = value.length ? value.length - 1 : -1;
       context.__loopMeta = context.__loopMeta || {};
       context.__loopMeta[node.id] = { count: value.length, itemKey, indexKey, outputKey };
       return { outputKey };
@@ -543,61 +610,30 @@ async function executeNode(args: {
       const results = await Promise.allSettled(
         tasks.map(async (task: any, idx: number) => {
           const taskId = String(task?.id || `task-${idx + 1}`);
-          const taskType = String(task?.type || "http_request");
-
-          if (taskType === "http_request") {
-            await withTimeout(
-              runHttp(prisma, task, context),
-              taskTimeoutMs,
-              `parallel_execute task ${taskId} timed out`
-            );
-            return {
+          return withTimeout(
+            executeInlineTask({
+              task,
               taskId,
-              taskType,
-              status: "succeeded" as const,
-              outputKey: task?.saveAs ? String(task.saveAs) : undefined
-            };
-          }
-
-          if (taskType === "set_variable") {
-            const key = String(task?.key || "");
-            if (!key) throw new Error(`parallel_execute task ${taskId} missing key`);
-            context[key] = await interpolateWithSecrets(task?.value, context, prisma);
-            return {
-              taskId,
-              taskType,
-              status: "succeeded" as const,
-              outputKey: key
-            };
-          }
-
-          if (taskType === "transform_llm") {
-            const llmOutputKey = String(task?.outputKey || "");
-            if (!llmOutputKey) {
-              throw new Error(`parallel_execute task ${taskId} missing outputKey`);
-            }
-            await withTimeout(
-              runLlm(task, context),
-              taskTimeoutMs,
-              `parallel_execute task ${taskId} timed out`
-            );
-            return {
-              taskId,
-              taskType,
-              status: "succeeded" as const,
-              outputKey: llmOutputKey
-            };
-          }
-
-          throw new Error(`parallel_execute task ${taskId} has unsupported type "${taskType}"`);
+              prisma,
+              context,
+              testMode
+            }),
+            taskTimeoutMs,
+            `parallel_execute task ${taskId} timed out`
+          );
         })
       );
 
       const summary = results.map((result, idx) => {
         const taskId = String(tasks[idx]?.id || `task-${idx + 1}`);
-        const taskType = String(tasks[idx]?.type || "http_request");
+        const taskType = String(tasks[idx]?.type || "unknown");
         if (result.status === "fulfilled") {
-          return result.value;
+          return {
+            taskId: result.value.taskId,
+            taskType: result.value.taskType,
+            status: "succeeded" as const,
+            outputKey: result.value.outputKey
+          };
         }
         return {
           taskId,
@@ -683,6 +719,87 @@ async function runHttp(prisma: PrismaClient, data: any, context: ExecutionContex
   if (!res.ok) {
     throw new Error(`HTTP ${method} ${url} failed with status ${res.status}`);
   }
+}
+
+async function executeInlineTask(args: {
+  task: any;
+  taskId: string;
+  prisma: PrismaClient;
+  context: ExecutionContext;
+  testMode: boolean;
+}) {
+  const { task, taskId, prisma, context, testMode } = args;
+  const taskType = String(task?.type || "http_request");
+
+  if (taskType === "http_request") {
+    await runHttp(prisma, task, context);
+    return {
+      taskId,
+      taskType,
+      outputKey: task?.saveAs ? String(task.saveAs) : undefined
+    };
+  }
+
+  if (taskType === "set_variable") {
+    const key = String(task?.key || "");
+    if (!key) throw new Error(`${taskType} task ${taskId} missing key`);
+    context[key] = await interpolateWithSecrets(task?.value, context, prisma);
+    return {
+      taskId,
+      taskType,
+      outputKey: key
+    };
+  }
+
+  if (taskType === "transform_llm") {
+    const outputKey = String(task?.outputKey || "");
+    if (!outputKey) {
+      throw new Error(`${taskType} task ${taskId} missing outputKey`);
+    }
+    await runLlm(task, context);
+    return {
+      taskId,
+      taskType,
+      outputKey
+    };
+  }
+
+  if (taskType === "validate_record") {
+    const input = context[task?.inputKey];
+    const result = validateRecord(input, task || {});
+    if (!result.ok) {
+      throw new Error(`Record validation failed: ${result.errors.join("; ")}`);
+    }
+    return {
+      taskId,
+      taskType
+    };
+  }
+
+  if (taskType === "submit_guard") {
+    const key = String(task?.inputKey || "");
+    const value = key ? context[key] : context;
+    const schemaResult = validateWithSchema(value, task?.schema);
+    if (!schemaResult.ok) {
+      throw new Error(`Submit guard failed: ${schemaResult.errors.join("; ")}`);
+    }
+    return {
+      taskId,
+      taskType
+    };
+  }
+
+  if (taskType === "manual_approval") {
+    if (testMode && task?.autoApproveInTestMode !== false) {
+      return {
+        taskId,
+        taskType
+      };
+    }
+    throw new Error("manual_approval is not supported in inline task execution");
+  }
+
+  throw new Error(`Unsupported inline task type "${taskType}"`);
 }
 
 async function runLlm(data: any, context: ExecutionContext) {
@@ -784,10 +901,10 @@ export function resolvePlaywrightHeadless(node: any, executionDefaults?: Executi
 }
 
 async function clickWithSelectorStrategies(page: Page, data: any) {
-  const candidates = buildSelectorCandidates(data);
+  const primaryCandidates = buildSelectorCandidates(data);
   const errors: string[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of primaryCandidates) {
     try {
       await clickCandidate(page, candidate);
       return;
@@ -796,15 +913,27 @@ async function clickWithSelectorStrategies(page: Page, data: any) {
     }
   }
 
-  const suggestion = await suggestSelector(page, data);
+  const suggested = await suggestSelectorCandidates(page, data, primaryCandidates);
+  for (const candidate of suggested) {
+    try {
+      await clickCandidate(page, candidate);
+      return;
+    } catch (error) {
+      errors.push(String(error));
+    }
+  }
+
+  const suggestion = suggested.length
+    ? `Try selectors: ${suggested.map((candidate) => candidateToString(candidate)).join(" | ")}`
+    : "";
   throw new Error(`Click failed. ${errors.join(" | ")} ${suggestion ? `Suggestion: ${suggestion}` : ""}`);
 }
 
 async function fillWithSelectorStrategies(page: Page, data: any, value: string) {
-  const candidates = buildSelectorCandidates(data);
+  const primaryCandidates = buildSelectorCandidates(data);
   const errors: string[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of primaryCandidates) {
     try {
       await fillCandidate(page, candidate, value);
       return;
@@ -813,15 +942,27 @@ async function fillWithSelectorStrategies(page: Page, data: any, value: string) 
     }
   }
 
-  const suggestion = await suggestSelector(page, data);
+  const suggested = await suggestSelectorCandidates(page, data, primaryCandidates);
+  for (const candidate of suggested) {
+    try {
+      await fillCandidate(page, candidate, value);
+      return;
+    } catch (error) {
+      errors.push(String(error));
+    }
+  }
+
+  const suggestion = suggested.length
+    ? `Try selectors: ${suggested.map((candidate) => candidateToString(candidate)).join(" | ")}`
+    : "";
   throw new Error(`Fill failed. ${errors.join(" | ")} ${suggestion ? `Suggestion: ${suggestion}` : ""}`);
 }
 
 async function extractWithSelectorStrategies(page: Page, data: any) {
-  const candidates = buildSelectorCandidates(data);
+  const primaryCandidates = buildSelectorCandidates(data);
   const errors: string[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of primaryCandidates) {
     try {
       return await extractCandidate(page, candidate);
     } catch (error) {
@@ -829,28 +970,62 @@ async function extractWithSelectorStrategies(page: Page, data: any) {
     }
   }
 
-  const suggestion = await suggestSelector(page, data);
+  const suggested = await suggestSelectorCandidates(page, data, primaryCandidates);
+  for (const candidate of suggested) {
+    try {
+      return await extractCandidate(page, candidate);
+    } catch (error) {
+      errors.push(String(error));
+    }
+  }
+
+  const suggestion = suggested.length
+    ? `Try selectors: ${suggested.map((candidate) => candidateToString(candidate)).join(" | ")}`
+    : "";
   throw new Error(`Extract failed. ${errors.join(" | ")} ${suggestion ? `Suggestion: ${suggestion}` : ""}`);
 }
 
 export function buildSelectorCandidates(data: any): any[] {
   const candidates: any[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (candidate: any) => {
+    if (!candidate) return;
+    const signature = candidateSignature(candidate);
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    candidates.push(candidate);
+  };
+
   if (Array.isArray(data?.selectors)) {
     for (const selector of data.selectors) {
-      candidates.push({ kind: "css", selector });
+      pushCandidate(selectorTextToCandidate(String(selector || "")));
     }
   }
-  if (data?.testId) candidates.push({ kind: "css", selector: `[data-testid="${data.testId}"]` });
-  if (data?.ariaLabel) candidates.push({ kind: "css", selector: `[aria-label="${data.ariaLabel}"]` });
-  if (data?.role && data?.name) candidates.push({ kind: "role", role: data.role, name: data.name });
-  if (data?.selector) candidates.push({ kind: "css", selector: data.selector });
-  if (data?.xpath) candidates.push({ kind: "xpath", selector: data.xpath });
+  if (data?.testId) pushCandidate({ kind: "css", selector: `[data-testid="${data.testId}"]` });
+  if (data?.ariaLabel) pushCandidate({ kind: "css", selector: `[aria-label="${data.ariaLabel}"]` });
+  if (data?.role) pushCandidate({ kind: "role", role: data.role, name: data.name });
+  if (data?.textHint) pushCandidate({ kind: "text", selector: String(data.textHint) });
+  if (data?.selector) pushCandidate(selectorTextToCandidate(String(data.selector)));
+  if (data?.xpath) pushCandidate({ kind: "xpath", selector: data.xpath });
   return candidates;
+}
+
+function roleLocator(page: Page, candidate: any) {
+  const role = String(candidate?.role || "button") as any;
+  const rawName = candidate?.name;
+  if (rawName === undefined || rawName === null || String(rawName).trim() === "") {
+    return page.getByRole(role);
+  }
+  return page.getByRole(role, { name: String(rawName) });
 }
 
 async function clickCandidate(page: Page, candidate: any) {
   if (candidate.kind === "role") {
-    await page.getByRole(candidate.role as any, { name: String(candidate.name) }).click({ timeout: 3000 });
+    await roleLocator(page, candidate).first().click({ timeout: 3000 });
+    return;
+  }
+  if (candidate.kind === "text") {
+    await page.locator(`text=${candidate.selector}`).first().click({ timeout: 3000 });
     return;
   }
   if (candidate.kind === "xpath") {
@@ -862,7 +1037,11 @@ async function clickCandidate(page: Page, candidate: any) {
 
 async function fillCandidate(page: Page, candidate: any, value: string) {
   if (candidate.kind === "role") {
-    await page.getByRole(candidate.role as any, { name: String(candidate.name) }).fill(value, { timeout: 3000 });
+    await roleLocator(page, candidate).first().fill(value, { timeout: 3000 });
+    return;
+  }
+  if (candidate.kind === "text") {
+    await page.locator(`text=${candidate.selector}`).first().fill(value, { timeout: 3000 });
     return;
   }
   if (candidate.kind === "xpath") {
@@ -874,7 +1053,10 @@ async function fillCandidate(page: Page, candidate: any, value: string) {
 
 async function extractCandidate(page: Page, candidate: any) {
   if (candidate.kind === "role") {
-    return page.getByRole(candidate.role as any, { name: String(candidate.name) }).first().textContent({ timeout: 3000 });
+    return roleLocator(page, candidate).first().textContent({ timeout: 3000 });
+  }
+  if (candidate.kind === "text") {
+    return page.locator(`text=${candidate.selector}`).first().textContent({ timeout: 3000 });
   }
   if (candidate.kind === "xpath") {
     return page.locator(`xpath=${candidate.selector}`).first().textContent({ timeout: 3000 });
@@ -882,11 +1064,64 @@ async function extractCandidate(page: Page, candidate: any) {
   return page.locator(candidate.selector).first().textContent({ timeout: 3000 });
 }
 
-async function suggestSelector(page: Page, data: any) {
+function candidateToString(candidate: any) {
+  if (candidate.kind === "role") {
+    if (candidate?.name !== undefined && candidate?.name !== null && String(candidate.name).trim() !== "") {
+      return `role=${candidate.role}[name=${String(candidate.name)}]`;
+    }
+    return `role=${candidate.role}`;
+  }
+  if (candidate.kind === "xpath") {
+    return `xpath=${candidate.selector}`;
+  }
+  if (candidate.kind === "text") {
+    return `text=${candidate.selector}`;
+  }
+  return String(candidate.selector || "");
+}
+
+function candidateSignature(candidate: any) {
+  return `${String(candidate.kind || "css")}:${candidateToString(candidate)}`;
+}
+
+export function selectorTextToCandidate(value: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const roleMatch = raw.match(/^role=([a-zA-Z0-9_:-]+)(?:\s*\[\s*name\s*=\s*(.+)\s*\])?$/i);
+  if (roleMatch) {
+    const role = String(roleMatch[1] || "").trim();
+    const rawName = String(roleMatch[2] || "").trim();
+    const name = rawName ? rawName.replace(/^['"]|['"]$/g, "") : "";
+    return name ? { kind: "role", role, name } : { kind: "role", role };
+  }
+  if (raw.startsWith("text=")) {
+    return { kind: "text", selector: raw.slice(5).trim() };
+  }
+  if (raw.startsWith("xpath=")) {
+    return { kind: "xpath", selector: raw.slice(6).trim() };
+  }
+  if (raw.startsWith("//")) {
+    return { kind: "xpath", selector: raw };
+  }
+  return { kind: "css", selector: raw };
+}
+
+async function suggestSelectorCandidates(page: Page, data: any, existing: any[] = []) {
+  const existingSignatures = new Set(existing.map((candidate) => candidateSignature(candidate)));
+  const candidates: any[] = [];
+
+  const pushCandidate = (candidate: any) => {
+    if (!candidate) return;
+    const signature = candidateSignature(candidate);
+    if (existingSignatures.has(signature)) return;
+    if (candidates.some((entry) => candidateSignature(entry) === signature)) return;
+    candidates.push(candidate);
+  };
+
   if (data?.textHint) {
     const found = await page.locator(`text=${data.textHint}`).first().count();
     if (found > 0) {
-      return `Use text selector: text=${data.textHint}`;
+      pushCandidate({ kind: "text", selector: String(data.textHint) });
     }
   }
 
@@ -910,18 +1145,15 @@ async function suggestSelector(page: Page, data: any) {
 
   if (selectorAiEnabled()) {
     const aiSelectors = await requestSelectorSuggestionsFromLlm(data, hints).catch(() => []);
-    if (aiSelectors.length) {
-      return `Try selectors: ${aiSelectors.join(" | ")}`;
-    }
+    aiSelectors.forEach((selector) => pushCandidate(selectorTextToCandidate(selector)));
   }
 
   const first = (hints || []).find((h: any) => h.testId || h.ariaLabel || h.text);
-  if (!first) return "";
-
-  if (first.testId) return `[data-testid=\"${first.testId}\"]`;
-  if (first.ariaLabel) return `[aria-label=\"${first.ariaLabel}\"]`;
-  if (first.text) return `text=${first.text}`;
-  return "";
+  if (first?.testId) pushCandidate({ kind: "css", selector: `[data-testid="${first.testId}"]` });
+  if (first?.ariaLabel) pushCandidate({ kind: "css", selector: `[aria-label="${first.ariaLabel}"]` });
+  if (first?.role && first?.text) pushCandidate({ kind: "role", role: String(first.role), name: String(first.text) });
+  if (first?.text) pushCandidate({ kind: "text", selector: String(first.text) });
+  return candidates.slice(0, 8);
 }
 
 function selectorAiEnabled() {
@@ -959,6 +1191,7 @@ export function buildSelectorAiPrompt(data: any, hints: Array<Record<string, unk
     `Goal: provide resilient selector candidates for this action: ${requestedAction}.`,
     requestedSelector ? `Current failing selector: ${requestedSelector}` : "No current selector available.",
     "Return ONLY JSON with this shape: {\"selectors\": [\"...\", \"...\"]}.",
+    "Allowed selector string formats: CSS selector, xpath=..., text=..., role=<role>[name=<text>].",
     "Prefer data-testid, aria-label, role+name, and stable attributes. Avoid nth-child when possible.",
     "DOM hints:",
     JSON.stringify(sanitizedHints)
@@ -1010,6 +1243,7 @@ function normalizeSelectors(values: unknown[]) {
           value.startsWith("//") ||
           value.startsWith("xpath=") ||
           value.startsWith("text=") ||
+          value.startsWith("role=") ||
           value.includes("[data-testid") ||
           value.includes("[aria-label") ||
           value.includes("button") ||

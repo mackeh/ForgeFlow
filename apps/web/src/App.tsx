@@ -314,6 +314,28 @@ export default function App() {
       .slice(0, 8);
   }, [activeRun?.id, activeRun?.logs]);
 
+  const runProgress = useMemo(() => {
+    if (!activeRun?.nodeStates || typeof activeRun.nodeStates !== "object" || Array.isArray(activeRun.nodeStates)) {
+      return null;
+    }
+    const values = Object.values(activeRun.nodeStates as Record<string, any>);
+    if (!values.length) return null;
+    const completed = values.filter((state: any) => {
+      const status = String(state?.status || "");
+      return status === "succeeded" || status === "failed" || status === "skipped";
+    }).length;
+    const running = values.filter((state: any) => String(state?.status || "") === "running").length;
+    const queued = values.filter((state: any) => String(state?.status || "") === "queued").length;
+    const pct = Math.max(0, Math.min(100, Math.round((completed / values.length) * 100)));
+    return {
+      total: values.length,
+      completed,
+      running,
+      queued,
+      pct
+    };
+  }, [activeRun?.id, activeRun?.nodeStates]);
+
   const upcomingScheduleGroups = useMemo(() => {
     const groups = new Map<string, UpcomingScheduleItem[]>();
     for (const item of upcomingSchedules) {
@@ -391,7 +413,7 @@ export default function App() {
 
     const timer = setInterval(() => {
       loadRun(activeRun.id).catch(() => undefined);
-    }, 2000);
+    }, 900);
 
     return () => clearInterval(timer);
   }, [activeRun?.id, activeRun?.status]);
@@ -969,6 +991,42 @@ export default function App() {
           validationErrors.push(`Node "${node.data?.label || node.id}" is missing "${field}".`);
         }
       });
+
+      if (nodeType === "parallel_execute" || nodeType === "loop_iterate") {
+        const tasks = Array.isArray(node?.data?.tasks) ? node.data.tasks : [];
+        const inlineTaskRequiredFields: Record<string, string[]> = {
+          http_request: ["url"],
+          set_variable: ["key"],
+          transform_llm: ["inputKey", "outputKey"],
+          validate_record: ["inputKey"],
+          submit_guard: ["inputKey"]
+        };
+
+        tasks.forEach((task: any, index: number) => {
+          const taskType = String(task?.type || "").trim();
+          if (!taskType) {
+            validationErrors.push(
+              `Node "${node.data?.label || node.id}" task #${index + 1} is missing "type".`
+            );
+            return;
+          }
+          const taskFields = inlineTaskRequiredFields[taskType];
+          if (!taskFields) {
+            validationErrors.push(
+              `Node "${node.data?.label || node.id}" task #${index + 1} has unsupported type "${taskType}".`
+            );
+            return;
+          }
+          taskFields.forEach((field) => {
+            const value = task?.[field];
+            if (value === undefined || value === null || String(value).trim() === "") {
+              validationErrors.push(
+                `Node "${node.data?.label || node.id}" task #${index + 1} is missing "${field}".`
+              );
+            }
+          });
+        });
+      }
     });
 
     const secretRegex = /\{\{secret:([A-Za-z0-9_\-:.]+)\}\}/g;
@@ -1931,6 +1989,20 @@ export default function App() {
               ) : (
                 <small>Select a run to inspect diagnostics.</small>
               )}
+              {runProgress ? (
+                <div className="run-progress">
+                  <div className="run-progress-head">
+                    <strong>Progress</strong>
+                    <small>
+                      {runProgress.completed}/{runProgress.total} complete · {runProgress.running} running ·{" "}
+                      {runProgress.queued} queued
+                    </small>
+                  </div>
+                  <div className="run-progress-track" aria-label="Run progress">
+                    <div className="run-progress-fill" style={{ width: `${runProgress.pct}%` }} />
+                  </div>
+                </div>
+              ) : null}
               {activeRun ? <button onClick={() => handleCopyRunContext().catch(showError)}>Copy Context JSON</button> : null}
               {failedNodes.length ? (
                 <div className="debug-list">
