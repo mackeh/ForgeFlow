@@ -13,6 +13,7 @@ From the project root:
 What this does:
 - Creates `.env` from `.env.example` (if missing)
 - Auto-updates images/dependencies (unless `AUTO_UPDATE=0`)
+- Attempts `xhost +local:` for desktop automation (unless `AUTO_X11_AUTH=0`)
 - Runs DB migration
 - Starts all services
 

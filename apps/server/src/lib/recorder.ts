@@ -20,7 +20,12 @@ const sessions = new Map<string, RecorderSession>();
 const sessionsByPage = new Map<Page, RecorderSession>();
 
 export async function startWebRecorder({ startUrl }: { startUrl?: string }): Promise<RecorderSessionInfo> {
-  const browser = await chromium.launch({ headless: false });
+  const headlessRaw = String(process.env.PLAYWRIGHT_HEADLESS ?? "false").toLowerCase().trim();
+  const headless = !(headlessRaw === "0" || headlessRaw === "false" || headlessRaw === "no");
+  const browser = await chromium.launch({
+    headless,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+  });
   const context = await browser.newContext();
   const page = await context.newPage();
 

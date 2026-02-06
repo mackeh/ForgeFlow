@@ -17,6 +17,7 @@ export type PreflightResult = {
 type PreflightDeps = {
   checkHealthFn?: (baseUrl: string, path: string) => Promise<boolean>;
   hasDisplayAccessFn?: () => Promise<boolean>;
+  checkDesktopReadyFn?: (baseUrl: string) => Promise<{ ok: boolean; message: string }>;
 };
 
 export async function preflightForDefinition(definition: any, deps: PreflightDeps = {}): Promise<PreflightResult> {
@@ -25,9 +26,10 @@ export async function preflightForDefinition(definition: any, deps: PreflightDep
   const headless = resolvePlaywrightHeadless({ data: {} }, definition?.execution);
   const checkHealthFn = deps.checkHealthFn || checkHealth;
   const hasDisplayAccessFn = deps.hasDisplayAccessFn || hasDisplayAccess;
+  const checkDesktopReadyFn = deps.checkDesktopReadyFn || checkDesktopReady;
 
-  const [agentHealth, ollamaHealth, displayAvailable] = await Promise.all([
-    checkHealthFn(process.env.AGENT_BASE_URL || "http://agent:7001", "/health"),
+  const [desktopReady, ollamaHealth, displayAvailable] = await Promise.all([
+    checkDesktopReadyFn(process.env.AGENT_BASE_URL || "http://agent:7001"),
     checkHealthFn(process.env.OLLAMA_BASE_URL || "http://ollama:11434", "/api/tags"),
     hasDisplayAccessFn()
   ]);
@@ -47,9 +49,9 @@ export async function preflightForDefinition(definition: any, deps: PreflightDep
     desktopAutomation: {
       state: "ok",
       message: needsDesktop
-        ? agentHealth
-          ? "Desktop agent reachable"
-          : "Desktop agent is not reachable"
+        ? desktopReady.ok
+          ? "Desktop automation is ready"
+          : desktopReady.message
         : "No desktop automation nodes in this workflow"
     },
     ollama: {
@@ -62,7 +64,7 @@ export async function preflightForDefinition(definition: any, deps: PreflightDep
     checks.webAutomation.state = "error";
   }
 
-  if (needsDesktop && !agentHealth) {
+  if (needsDesktop && !desktopReady.ok) {
     checks.desktopAutomation.state = "error";
   }
 
@@ -100,6 +102,25 @@ async function checkHealth(baseUrl: string, path: string): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+async function checkDesktopReady(baseUrl: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/preflight`, 2500);
+    if (!res.ok) {
+      return { ok: false, message: "Desktop agent preflight endpoint unavailable" };
+    }
+    const json = await res.json().catch(() => ({}));
+    if (json?.ok) {
+      return { ok: true, message: "Desktop automation is ready" };
+    }
+    const message = json?.error
+      ? `Desktop preflight failed: ${json.error}`
+      : "Desktop preflight failed";
+    return { ok: false, message };
+  } catch {
+    return { ok: false, message: "Desktop agent is not reachable" };
   }
 }
 

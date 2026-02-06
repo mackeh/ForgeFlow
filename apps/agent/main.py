@@ -41,6 +41,24 @@ def health():
     return {"ok": True}
 
 
+@app.get("/preflight")
+def preflight():
+    try:
+        size = pyautogui.size()
+        return {
+            "ok": True,
+            "display": os.environ.get("DISPLAY", ""),
+            "screen": {"width": size.width, "height": size.height}
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "display": os.environ.get("DISPLAY", ""),
+            "error": str(exc),
+            "hint": "Run xhost +local: on host and ensure DISPLAY is forwarded to the container."
+        }
+
+
 @app.post("/record/start")
 def record_start(payload: RecordStartPayload):
     global recording, recorded_events, mouse_listener, keyboard_listener, key_buffer, last_key_ts, current_session_dir
@@ -149,42 +167,45 @@ def run_action(payload: RunPayload):
     action_type = payload.type
     data = payload.data
 
-    if action_type == "desktop_click":
-        pyautogui.click(x=data.get("x"), y=data.get("y"), button=data.get("button", "left"))
-        return {"ok": True}
-
-    if action_type == "desktop_click_image":
-        path = data.get("imagePath")
-        confidence = data.get("confidence", 0.8)
-        if path:
-            location = pyautogui.locateOnScreen(path, confidence=confidence)
-            if location:
-                pyautogui.click(x=location.left + location.width / 2, y=location.top + location.height / 2)
-                return {"ok": True, "matched": True}
-        if data.get("x") is not None and data.get("y") is not None:
+    try:
+        if action_type == "desktop_click":
             pyautogui.click(x=data.get("x"), y=data.get("y"), button=data.get("button", "left"))
-            return {"ok": True, "matched": False}
-        return {"ok": False, "error": "image_not_found"}
+            return {"ok": True}
 
-    if action_type == "desktop_type":
-        value = data.get("value", "")
-        pyautogui.typewrite(value, interval=0.01)
-        return {"ok": True}
+        if action_type == "desktop_click_image":
+            path = data.get("imagePath")
+            confidence = data.get("confidence", 0.8)
+            if path:
+                location = pyautogui.locateOnScreen(path, confidence=confidence)
+                if location:
+                    pyautogui.click(x=location.left + location.width / 2, y=location.top + location.height / 2)
+                    return {"ok": True, "matched": True}
+            if data.get("x") is not None and data.get("y") is not None:
+                pyautogui.click(x=data.get("x"), y=data.get("y"), button=data.get("button", "left"))
+                return {"ok": True, "matched": False}
+            return {"ok": False, "error": "image_not_found"}
 
-    if action_type == "desktop_wait_for_image":
-        path = data.get("imagePath")
-        timeout = data.get("timeoutMs", 10000) / 1000
-        start = time.time()
-        while time.time() - start < timeout:
-            location = pyautogui.locateOnScreen(path, confidence=0.8)
-            if location:
-                return {"ok": True, "location": {
-                    "left": location.left,
-                    "top": location.top,
-                    "width": location.width,
-                    "height": location.height
-                }}
-            time.sleep(0.25)
-        return {"ok": False, "error": "timeout"}
+        if action_type == "desktop_type":
+            value = data.get("value", "")
+            pyautogui.typewrite(value, interval=0.01)
+            return {"ok": True}
 
-    return {"ok": False, "error": "unknown_action"}
+        if action_type == "desktop_wait_for_image":
+            path = data.get("imagePath")
+            timeout = data.get("timeoutMs", 10000) / 1000
+            start = time.time()
+            while time.time() - start < timeout:
+                location = pyautogui.locateOnScreen(path, confidence=0.8)
+                if location:
+                    return {"ok": True, "location": {
+                        "left": location.left,
+                        "top": location.top,
+                        "width": location.width,
+                        "height": location.height
+                    }}
+                time.sleep(0.25)
+            return {"ok": False, "error": "timeout"}
+
+        return {"ok": False, "error": "unknown_action"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}

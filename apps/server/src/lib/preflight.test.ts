@@ -24,6 +24,7 @@ test("preflight blocks web run when headless is false and display is unavailable
     },
     {
       checkHealthFn: async () => true,
+      checkDesktopReadyFn: async () => ({ ok: true, message: "ok" }),
       hasDisplayAccessFn: async () => false
     }
   );
@@ -39,16 +40,15 @@ test("preflight blocks desktop run when agent is unavailable", async () => {
       execution: { playwrightHeadless: true }
     },
     {
-      checkHealthFn: async (baseUrl, path) => {
-        if (path === "/health" && baseUrl.includes("agent")) return false;
-        return true;
-      },
+      checkHealthFn: async () => true,
+      checkDesktopReadyFn: async () => ({ ok: false, message: "Desktop preflight failed: Xauth denied" }),
       hasDisplayAccessFn: async () => true
     }
   );
 
   assert.equal(result.ready, false);
   assert.equal(result.checks.desktopAutomation.state, "error");
+  assert.equal(result.checks.desktopAutomation.message.includes("Xauth"), true);
 });
 
 test("preflight allows web run in headless mode without display", async () => {
@@ -59,6 +59,7 @@ test("preflight allows web run in headless mode without display", async () => {
     },
     {
       checkHealthFn: async () => true,
+      checkDesktopReadyFn: async () => ({ ok: true, message: "ok" }),
       hasDisplayAccessFn: async () => false
     }
   );

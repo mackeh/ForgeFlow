@@ -27,6 +27,9 @@ Detailed usage guide:
 - Rebuilds `server`, `web`, and `agent` with fresh base layers and dependency installs.
 - Disable with:
 - `AUTO_UPDATE=0 ./start.sh`
+- `start.sh` also attempts `xhost +local:` automatically for desktop automation.
+- Disable X11 auth automation with:
+- `AUTO_X11_AUTH=0 ./start.sh`
 ## First-time DB setup
 - `docker compose run --rm server npm run prisma:migrate`
 
@@ -39,6 +42,7 @@ Detailed usage guide:
 - **Desktop recorder** captures a small image around each click and stores it under `apps/agent/recordings`.
 - Thumbnails in the UI are served from the server at `/recordings/...` (mounted from the agent recordings folder).
 - Failure artifacts (screenshots + DOM snapshots) are stored under `apps/server/artifacts` and served at `/artifacts/...`.
+- Desktop preflight checks `/preflight` on the agent and blocks runs when X11 authorization is not valid.
 
 ## Reliability features
 - Node state machine: `queued -> running -> succeeded/failed/skipped`.

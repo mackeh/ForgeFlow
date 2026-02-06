@@ -94,13 +94,16 @@ export async function startRun(prisma: PrismaClient, runId: string) {
   let page: Page | null = null;
   let checkpointNodeId: string | null = run.checkpointNodeId || null;
   const runStart = run.startedAt ? new Date(run.startedAt).getTime() : Date.now();
-  const globalTimeoutMs = Number(definition?.execution?.globalTimeoutMs || 30 * 60 * 1000);
+  const globalTimeoutMs = Number(definition?.execution?.globalTimeoutMs || 5 * 60 * 1000); // Default to 5m instead of 30m
 
   try {
     while (true) {
       if (Date.now() - runStart > globalTimeoutMs) {
+        console.log(`[Runner] Global run timeout exceeded for run ${run.id}`);
         throw new Error(`Global run timeout exceeded (${globalTimeoutMs}ms)`);
       }
+
+      console.log(`[Runner] Loop iteration for run ${run.id}. Node states:`, Object.fromEntries(Object.entries(nodeStates).map(([id, s]) => [id, s.status])));
 
       const pendingNodes = nodes.filter((node: any) => {
         const s = nodeStates[node.id]?.status;
@@ -141,10 +144,11 @@ export async function startRun(prisma: PrismaClient, runId: string) {
         progressed = true;
         state.status = "running";
         state.startedAt = new Date().toISOString();
+        console.log(`[Runner] Starting node ${node.id} (${nodeType(node)})`);
         logs.push(logEvent(node.id, nodeType(node), "start"));
 
         const retryCount = Number(node.data?.retryCount ?? definition?.execution?.defaultRetries ?? 2);
-        const timeoutMs = Number(node.data?.timeoutMs ?? definition?.execution?.defaultNodeTimeoutMs ?? 30_000);
+        const timeoutMs = Number(node.data?.timeoutMs ?? definition?.execution?.defaultNodeTimeoutMs ?? 10_000); // Default to 10s instead of 30s
 
         try {
           const { outputKey, attempts } = await runNodeWithRetry({
@@ -237,10 +241,12 @@ export async function startRun(prisma: PrismaClient, runId: string) {
     }
 
     const failedCount = Object.values(nodeStates).filter((s) => s.status === "failed").length;
+    const finalStatus = failedCount > 0 ? "FAILED" : "SUCCEEDED";
+    console.log(`[Runner] Finishing run ${run.id} with status: ${finalStatus}`);
     await prisma.run.update({
       where: { id: run.id },
       data: {
-        status: failedCount > 0 ? "FAILED" : "SUCCEEDED",
+        status: finalStatus,
         finishedAt: new Date(),
         nodeStates: toJson(nodeStates),
         context: toJson(context),
@@ -262,7 +268,12 @@ export async function startRun(prisma: PrismaClient, runId: string) {
       }
     });
   } finally {
-    if (browser) await (browser as any).close();
+    if (browser) {
+      console.log(`[Runner] Closing browser for run ${run.id}...`);
+      await (browser as any).close();
+      console.log(`[Runner] Browser closed for run ${run.id}.`);
+    }
+    console.log(`[Runner] startRun finished for ${run.id}`);
   }
 }
 
@@ -329,6 +340,7 @@ async function runNodeWithRetry(args: {
         throw error;
       }
       lastError = error;
+      console.error(`[Runner] Error in node ${node.id} (attempt ${attempt}):`, error);
       logs.push(logEvent(node.id, nodeType(node), "retry_error", { attempt, error: String(error) }));
       if (currentPage) {
         const failureArtifacts = await captureFailureArtifacts(runId, node.id, currentPage, attempt, error);
@@ -543,7 +555,20 @@ async function runDesktop(type: string, data: any, context: ExecutionContext, pr
 }
 
 async function ensurePage(browser: Browser | null, page: Page | null, headless: boolean) {
-  if (!browser) browser = await chromium.launch({ headless });
+  console.log(`[Runner] ensurePage: headless=${headless}`);
+  if (!browser) {
+    console.log(`[Runner] Launching browser (headless=${headless})...`);
+    try {
+      browser = await chromium.launch({
+        headless,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+      });
+      console.log(`[Runner] Browser launched.`);
+    } catch (launchError) {
+      console.error(`[Runner] Failed to launch browser:`, launchError);
+      throw launchError;
+    }
+  }
   if (!page) {
     const context = await browser.newContext();
     page = await context.newPage();
