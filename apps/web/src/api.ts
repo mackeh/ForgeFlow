@@ -1,5 +1,11 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
+type RequestError = Error & {
+  status?: number;
+  path?: string;
+  details?: unknown;
+};
+
 export function getToken() {
   return localStorage.getItem("token");
 }
@@ -14,6 +20,15 @@ export function clearToken() {
 
 async function request(path: string, options: RequestInit = {}) {
   const token = getToken();
+  const isLogin = path === "/api/auth/login";
+  if (path.startsWith("/api/") && !isLogin && !token) {
+    clearToken();
+    const missingTokenError = new Error("Missing token. Please sign in again.") as RequestError;
+    missingTokenError.status = 401;
+    missingTokenError.path = path;
+    throw missingTokenError;
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers || {})
@@ -26,11 +41,19 @@ async function request(path: string, options: RequestInit = {}) {
   });
 
   if (!res.ok) {
-    if (res.status === 401 && path !== "/api/auth/login") {
+    if (res.status === 401 && !isLogin) {
       clearToken();
     }
-    const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Request failed");
+    const errPayload = await res.json().catch(() => ({ error: "Request failed" }));
+    const message =
+      res.status === 401 && !isLogin
+        ? "Session expired or invalid. Please sign in again."
+        : errPayload.error || `Request failed (${res.status})`;
+    const requestError = new Error(message) as RequestError;
+    requestError.status = res.status;
+    requestError.path = path;
+    requestError.details = errPayload;
+    throw requestError;
   }
   return res.json();
 }

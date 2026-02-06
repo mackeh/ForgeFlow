@@ -26,19 +26,22 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   const header = req.headers.authorization || "";
   const token = header.replace("Bearer ", "");
   if (!token) {
+    console.warn(`[auth] missing token for ${req.method} ${req.path}`);
     res.status(401).json({ error: "Missing token" });
     return;
   }
   resolveAuthContextFromToken(token)
     .then((auth) => {
       if (!auth) {
+        console.warn(`[auth] invalid token payload for ${req.method} ${req.path}`);
         res.status(401).json({ error: "Invalid token payload" });
         return;
       }
       (req as any).auth = auth;
       next();
     })
-    .catch(() => {
+    .catch((error) => {
+      console.warn(`[auth] token validation failed for ${req.method} ${req.path}: ${String(error)}`);
       res.status(401).json({ error: "Invalid token" });
     });
 }
@@ -68,6 +71,7 @@ export async function verifyLogin(username: string, password: string) {
   const state = failedAttempts.get(username);
 
   if (state && state.lockUntil > now) {
+    console.warn(`[auth] login rejected (locked): ${username}`);
     return null;
   }
 
@@ -79,6 +83,7 @@ export async function verifyLogin(username: string, password: string) {
   }
 
   registerFailure(username);
+  console.warn(`[auth] login failed: ${username}`);
   return null;
 }
 

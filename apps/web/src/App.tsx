@@ -63,6 +63,12 @@ import { Inspector } from "./components/Inspector";
 const nodeTypes = { action: ActionNode };
 type ToastLevel = "info" | "success" | "error";
 type Toast = { id: number; message: string; level: ToastLevel };
+type UiLogEntry = {
+  id: number;
+  at: string;
+  level: ToastLevel;
+  message: string;
+};
 
 const defaultDefinition = {
   nodes: [
@@ -123,11 +129,14 @@ export default function App() {
   const [webhookSecret, setWebhookSecret] = useState("");
   const [webhookEventSelection, setWebhookEventSelection] = useState<string[]>(["run.failed"]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [uiLogs, setUiLogs] = useState<UiLogEntry[]>([]);
+  const [loadingActions, setLoadingActions] = useState<Record<string, boolean>>({});
   const [snapToGrid, setSnapToGrid] = useState(true);
 
   const nodesRef = useRef<Node[]>(nodes);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const toastIdRef = useRef(1);
+  const logIdRef = useRef(1);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -222,8 +231,37 @@ export default function App() {
     }, 3500);
   };
 
+  const pushUiLog = (message: string, level: ToastLevel = "info") => {
+    const id = logIdRef.current++;
+    const entry: UiLogEntry = {
+      id,
+      at: new Date().toLocaleTimeString(),
+      level,
+      message
+    };
+    setUiLogs((prev) => [entry, ...prev].slice(0, 120));
+  };
+
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      const message = event.error ? String(event.error) : event.message || "Unknown window error";
+      pushUiLog(message, "error");
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      pushUiLog(`Unhandled rejection: ${String(event.reason)}`, "error");
+    };
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
+
   const setFeedback = (message: string, level: ToastLevel = "info") => {
     setStatus(message);
+    pushUiLog(message, level);
     pushToast(message, level);
   };
 
@@ -237,8 +275,27 @@ export default function App() {
       clearToken();
       setToken(null);
     }
+    console.error("[ui]", error);
     setFeedback(message, "error");
   };
+
+  const withActionLoading = async (actionId: string, run: () => Promise<void> | void) => {
+    if (loadingActions[actionId]) return;
+    setLoadingActions((prev) => ({ ...prev, [actionId]: true }));
+    try {
+      await run();
+    } catch (error) {
+      showError(error);
+    } finally {
+      setLoadingActions((prev) => {
+        const next = { ...prev };
+        delete next[actionId];
+        return next;
+      });
+    }
+  };
+
+  const isActionLoading = (actionId: string) => Boolean(loadingActions[actionId]);
 
   async function refreshWorkflows(forceSelectFirst = false) {
     const data = await getWorkflows();
@@ -311,10 +368,13 @@ export default function App() {
   const handleLogin = async (username: string, password: string) => {
     try {
       const result = await login(username, password);
-      if (result?.user) {
-        setCurrentUser(result.user);
+      const storedToken = localStorage.getItem("token");
+      if (!storedToken) {
+        throw new Error("Login failed: token was not stored");
       }
-      setToken(localStorage.getItem("token"));
+      const me = await getCurrentUser();
+      setCurrentUser(me || result?.user || null);
+      setToken(storedToken);
       setFeedback("Signed in", "success");
     } catch (err: any) {
       showError(err);
@@ -491,6 +551,7 @@ export default function App() {
       setEdges((eds) => [...eds, { id: `e-${lastNode.id}-${id}`, source: lastNode.id, target: id }]);
     }
 
+    setStatus(`Added node: ${newNode.data?.label || type}`);
     return id;
   };
 
@@ -893,13 +954,17 @@ export default function App() {
             <input placeholder="Username" id="username" />
             <input placeholder="Password" id="password" type="password" />
             <button
+              disabled={isActionLoading("login")}
+              className={isActionLoading("login") ? "is-loading" : ""}
               onClick={() => {
-                const username = (document.getElementById("username") as HTMLInputElement).value;
-                const password = (document.getElementById("password") as HTMLInputElement).value;
-                handleLogin(username, password);
+                withActionLoading("login", async () => {
+                  const username = (document.getElementById("username") as HTMLInputElement).value;
+                  const password = (document.getElementById("password") as HTMLInputElement).value;
+                  await handleLogin(username, password);
+                });
               }}
             >
-              Sign in
+              {isActionLoading("login") ? "Signing in..." : "Sign in"}
             </button>
             {status && <span className="status">{status}</span>}
           </div>
@@ -917,7 +982,7 @@ export default function App() {
           selectWorkflow(wf).catch(showError);
         }}
         onCreate={() => {
-          handleCreateWorkflow().catch(showError);
+          withActionLoading("create-workflow", handleCreateWorkflow);
         }}
       >
         <small>
@@ -948,7 +1013,13 @@ export default function App() {
           onChange={(e) => setTemplateWorkflowName(e.target.value)}
           placeholder="New workflow name (optional)"
         />
-        <button onClick={() => handleCreateFromTemplate().catch(showError)}>Create From Template</button>
+        <button
+          disabled={isActionLoading("create-template")}
+          className={isActionLoading("create-template") ? "is-loading" : ""}
+          onClick={() => withActionLoading("create-template", handleCreateFromTemplate)}
+        >
+          {isActionLoading("create-template") ? "Creating..." : "Create From Template"}
+        </button>
         <h3>Schedules</h3>
         <input value={scheduleName} onChange={(e) => setScheduleName(e.target.value)} placeholder="Schedule name" />
         <input value={scheduleCron} onChange={(e) => setScheduleCron(e.target.value)} placeholder="Cron (local time)" />
@@ -961,7 +1032,13 @@ export default function App() {
           <input type="checkbox" checked={scheduleTestMode} onChange={(e) => setScheduleTestMode(e.target.checked)} />
           <span>Run in test mode</span>
         </label>
-        <button onClick={() => handleCreateSchedule().catch(showError)}>Add Schedule</button>
+        <button
+          disabled={isActionLoading("create-schedule")}
+          className={isActionLoading("create-schedule") ? "is-loading" : ""}
+          onClick={() => withActionLoading("create-schedule", handleCreateSchedule)}
+        >
+          {isActionLoading("create-schedule") ? "Adding..." : "Add Schedule"}
+        </button>
         <div className="schedule-list">
           {schedules.slice(0, 8).map((schedule) => (
             <div key={schedule.id} className="schedule-item">
@@ -1138,21 +1215,59 @@ export default function App() {
             ))}
           </div>
           <div className="toolbar-right">
-            <button onClick={() => handleStartRecorder().catch(showError)}>Record Web</button>
             <button
+              disabled={isActionLoading("record-web")}
+              className={isActionLoading("record-web") ? "is-loading" : ""}
+              onClick={() => withActionLoading("record-web", handleStartRecorder)}
+            >
+              {isActionLoading("record-web") ? "Starting..." : "Record Web"}
+            </button>
+            <button
+              disabled={isActionLoading("record-desktop")}
+              className={isActionLoading("record-desktop") ? "is-loading" : ""}
               onClick={() =>
-                (desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()).catch(showError)
+                withActionLoading("record-desktop", () =>
+                  desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()
+                )
               }
             >
-              {desktopRecording ? "Stop Desktop" : "Record Desktop"}
+              {isActionLoading("record-desktop") ? "Working..." : desktopRecording ? "Stop Desktop" : "Record Desktop"}
             </button>
-            <button onClick={autoLayoutNodes}>Auto Layout</button>
+            <button
+              disabled={isActionLoading("auto-layout")}
+              className={isActionLoading("auto-layout") ? "is-loading" : ""}
+              onClick={() => withActionLoading("auto-layout", autoLayoutNodes)}
+            >
+              Auto Layout
+            </button>
             <button onClick={() => setSnapToGrid((value) => !value)}>{snapToGrid ? "Snap: On" : "Snap: Off"}</button>
-            <button onClick={() => handleSave().catch(showError)}>Save Draft</button>
-            <button onClick={() => handlePublish().catch(showError)}>Publish</button>
-            <button onClick={() => runWorkflow(true).catch(showError)}>Test Run</button>
-            <button className="primary" onClick={() => runWorkflow(false).catch(showError)}>
-              Run
+            <button
+              disabled={isActionLoading("save-draft")}
+              className={isActionLoading("save-draft") ? "is-loading" : ""}
+              onClick={() => withActionLoading("save-draft", handleSave)}
+            >
+              {isActionLoading("save-draft") ? "Saving..." : "Save Draft"}
+            </button>
+            <button
+              disabled={isActionLoading("publish")}
+              className={isActionLoading("publish") ? "is-loading" : ""}
+              onClick={() => withActionLoading("publish", handlePublish)}
+            >
+              {isActionLoading("publish") ? "Publishing..." : "Publish"}
+            </button>
+            <button
+              disabled={isActionLoading("test-run")}
+              className={isActionLoading("test-run") ? "is-loading" : ""}
+              onClick={() => withActionLoading("test-run", () => runWorkflow(true))}
+            >
+              {isActionLoading("test-run") ? "Running..." : "Test Run"}
+            </button>
+            <button
+              className={`primary ${isActionLoading("run") ? "is-loading" : ""}`}
+              disabled={isActionLoading("run")}
+              onClick={() => withActionLoading("run", () => runWorkflow(false))}
+            >
+              {isActionLoading("run") ? "Running..." : "Run"}
             </button>
           </div>
         </div>
@@ -1191,7 +1306,13 @@ export default function App() {
               <option value={14}>14 days</option>
               <option value={30}>30 days</option>
             </select>
-            <button onClick={() => refreshDashboard().catch(showError)}>Refresh</button>
+            <button
+              disabled={isActionLoading("refresh-dashboard")}
+              className={isActionLoading("refresh-dashboard") ? "is-loading" : ""}
+              onClick={() => withActionLoading("refresh-dashboard", () => refreshDashboard())}
+            >
+              {isActionLoading("refresh-dashboard") ? "Refreshing..." : "Refresh"}
+            </button>
           </div>
         </div>
 
@@ -1264,6 +1385,17 @@ export default function App() {
           </div>
         </div>
 
+        <div className="log-window">
+          <div className="log-header">Live Logs</div>
+          <div className="log-body">
+            {uiLogs.length === 0 ? <div className="log-line log-info">No logs yet.</div> : null}
+            {uiLogs.map((entry) => (
+              <div key={entry.id} className={`log-line log-${entry.level}`}>
+                <span>[{entry.at}]</span> {entry.message}
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="status-bar">{status || "Ready"}</div>
         <div className="toast-stack">
           {toasts.map((toast) => (
