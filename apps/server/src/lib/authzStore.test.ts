@@ -4,13 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import { rm } from "node:fs/promises";
 import {
+  beginTwoFactorSetup,
+  confirmTwoFactorSetup,
   createUser,
+  getTwoFactorStatus,
   listRoles,
   listUsers,
   upsertRolePermissions,
   updateUser,
   verifyUserCredentials
 } from "./authzStore.js";
+import { generateTotpToken } from "./totp.js";
 
 async function useTempAuthz(testName: string) {
   const file = path.join(os.tmpdir(), `forgeflow-authz-store-${testName}.json`);
@@ -54,4 +58,18 @@ test("roles can be customized", async () => {
   const qa = roles.find((entry) => entry.role === "qa");
   assert.ok(qa);
   assert.equal(qa?.permissions.includes("metrics:read"), true);
+});
+
+test("2fa setup can be enabled with valid totp code", async () => {
+  await useTempAuthz("2fa");
+  const setup = await beginTwoFactorSetup("local");
+  assert.equal(typeof setup.secret, "string");
+  assert.equal(setup.otpauthUrl.startsWith("otpauth://totp/"), true);
+
+  const token = generateTotpToken(setup.secret, { at: new Date() });
+  const user = await confirmTwoFactorSetup("local", token);
+  assert.equal(user.twoFactorEnabled, true);
+
+  const status = await getTwoFactorStatus("local");
+  assert.equal(status.enabled, true);
 });

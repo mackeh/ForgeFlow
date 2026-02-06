@@ -148,7 +148,66 @@ Selector reliability tips:
 - Fill `selector`, `textHint`, `testId`, and `ariaLabel` in Playwright nodes when possible.
 - Keep `SELECTOR_AI_ENABLED=1` for automatic fallback suggestions.
 
-## 12. Secrets and LLM transforms
+## 12. Collaborate in real time
+
+When multiple users are signed in:
+- Presence is shown in the sidebar (`viewing`/`editing` + selected node)
+- Add workflow comments (optionally tied to selected node)
+- Review attributed change history (who changed what and when)
+
+Live collaboration uses WebSocket presence on:
+- `/ws?type=collab&workflowId=<id>&token=<jwt>`
+
+## 13. Configure integrations and CSV imports
+
+Use the `Integrations` section in the sidebar to:
+1. Create connector profiles (`http_api`, `postgresql`, `mysql`, `mongodb`, `google_sheets`, `airtable`, `s3`)
+2. Test connectivity
+3. Delete old connectors
+
+Use `Parse CSV + Add Node` to:
+- Parse inline CSV text or a file path
+- Automatically add a `data_import_csv` node to your workflow
+
+For API-style connectors, use `integration_request` node fields:
+- `integrationId`
+- `path` (or full `url` override)
+- `method`
+- `saveAs`
+
+## 14. Visual regression and deep debugging
+
+Visual regression:
+1. Add `playwright_visual_assert` node.
+2. Set `baselineName` and optional `selector`.
+3. Run once with `autoCreateBaseline=true` to capture baseline.
+4. Run again to compare using `thresholdPct`.
+
+Debugging tools now available in `Run Diagnostics`:
+- Failed-node summary and retry information
+- Variable inspector (context snapshot)
+- Network inspector (`http_request`/`integration_request` logs)
+- Screenshot, DOM snapshot, and visual artifact galleries
+
+## 15. Enable two-factor authentication (TOTP)
+
+Per-user 2FA flow in sidebar `Security` section:
+1. Click `Start 2FA Setup`.
+2. Scan QR code in authenticator app (or use manual secret).
+3. Enter current 6-digit token.
+4. Click `Verify 2FA Setup`.
+
+After enablement:
+- Login requires username + password + TOTP code.
+- Disable requires current valid TOTP code.
+
+Related API endpoints:
+- `GET /api/auth/2fa/status`
+- `POST /api/auth/2fa/setup`
+- `POST /api/auth/2fa/verify-setup`
+- `POST /api/auth/2fa/disable`
+
+## 16. Secrets and LLM transforms
 
 Add secrets:
 1. Enter key/value in `Secrets` panel.
@@ -168,7 +227,7 @@ Pull model once:
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
 
-## 13. Admin features
+## 17. Admin features
 
 For admin users:
 - Manage users (create/disable/delete)
@@ -188,7 +247,7 @@ curl -sS "http://localhost:8080/api/admin/audit?limit=20" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 14. Useful commands
+## 18. Useful commands
 
 Start without auto-update:
 
@@ -226,7 +285,7 @@ Rebuild clean container node modules (fix module errors):
 docker compose up --build --renew-anon-volumes
 ```
 
-## 15. Troubleshooting
+## 19. Troubleshooting
 
 Login fails:
 - Verify `APP_USERNAME` and `APP_PASSWORD` in `.env`.

@@ -58,10 +58,10 @@ async function request(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
-export async function login(username: string, password: string) {
+export async function login(username: string, password: string, totpCode?: string) {
   const data = await request("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password, totpCode })
   });
   setToken(data.token);
   return data;
@@ -69,6 +69,31 @@ export async function login(username: string, password: string) {
 
 export function getCurrentUser() {
   return request("/api/auth/me");
+}
+
+export function getTwoFactorStatus() {
+  return request("/api/auth/2fa/status");
+}
+
+export function beginTwoFactorSetup() {
+  return request("/api/auth/2fa/setup", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export function verifyTwoFactorSetup(token: string) {
+  return request("/api/auth/2fa/verify-setup", {
+    method: "POST",
+    body: JSON.stringify({ token })
+  });
+}
+
+export function disableTwoFactor(token: string) {
+  return request("/api/auth/2fa/disable", {
+    method: "POST",
+    body: JSON.stringify({ token })
+  });
 }
 
 export function getWorkflows() {
@@ -133,6 +158,86 @@ export function startRun(workflowId: string, options?: { testMode?: boolean; inp
 
 export function getWorkflowRuns(workflowId: string) {
   return request(`/api/workflows/${workflowId}/runs`);
+}
+
+export function getWorkflowPresence(workflowId: string) {
+  return request(`/api/workflows/${workflowId}/collab/presence`);
+}
+
+export function getWorkflowComments(workflowId: string) {
+  return request(`/api/workflows/${workflowId}/comments`);
+}
+
+export function createWorkflowComment(
+  workflowId: string,
+  payload: {
+    message: string;
+    nodeId?: string;
+  }
+) {
+  return request(`/api/workflows/${workflowId}/comments`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteWorkflowComment(workflowId: string, commentId: string) {
+  return request(`/api/workflows/${workflowId}/comments/${commentId}`, {
+    method: "DELETE"
+  });
+}
+
+export function getWorkflowHistory(workflowId: string, limit = 80) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  return request(`/api/workflows/${workflowId}/history?${q.toString()}`);
+}
+
+export function getIntegrations() {
+  return request("/api/integrations");
+}
+
+export function createIntegration(payload: {
+  name: string;
+  type: "postgresql" | "mysql" | "mongodb" | "google_sheets" | "airtable" | "s3" | "http_api";
+  config?: Record<string, unknown>;
+}) {
+  return request("/api/integrations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateIntegration(
+  id: string,
+  payload: {
+    name?: string;
+    type?: "postgresql" | "mysql" | "mongodb" | "google_sheets" | "airtable" | "s3" | "http_api";
+    config?: Record<string, unknown>;
+  }
+) {
+  return request(`/api/integrations/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteIntegration(id: string) {
+  return request(`/api/integrations/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function testIntegration(id: string) {
+  return request(`/api/integrations/${id}/test`, {
+    method: "POST"
+  });
+}
+
+export function importCsv(payload: { text?: string; filePath?: string }) {
+  return request("/api/integrations/import/csv", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function getRun(runId: string) {

@@ -65,6 +65,22 @@ function quickFieldsForType(nodeType: string): QuickField[] {
         { key: "xpath", label: "XPath" },
         { key: "selectorModel", label: "Selector AI Model" }
       ];
+    case "playwright_visual_assert":
+      return [
+        { key: "baselineName", label: "Baseline Name" },
+        { key: "selector", label: "Selector (optional)" },
+        { key: "thresholdPct", label: "Threshold %", type: "number" },
+        {
+          key: "autoCreateBaseline",
+          label: "Auto Create Baseline",
+          type: "select",
+          options: [
+            { label: "True", value: "true" },
+            { label: "False", value: "false" }
+          ]
+        },
+        { key: "outputKey", label: "Output Key" }
+      ];
     case "transform_llm":
       return [
         { key: "inputKey", label: "Input Key" },
@@ -143,6 +159,20 @@ function quickFieldsForType(nodeType: string): QuickField[] {
           ]
         }
       ];
+    case "data_import_csv":
+      return [
+        { key: "filePath", label: "CSV File Path" },
+        { key: "text", label: "CSV Text (optional)" },
+        { key: "outputKey", label: "Output Key" }
+      ];
+    case "integration_request":
+      return [
+        { key: "integrationId", label: "Integration ID" },
+        { key: "method", label: "Method" },
+        { key: "path", label: "Path" },
+        { key: "url", label: "URL (optional override)" },
+        { key: "saveAs", label: "Save As" }
+      ];
     case "desktop_click_image":
       return [
         { key: "imagePath", label: "Image Path" },
@@ -177,7 +207,11 @@ function coerceFieldValue(field: QuickField, value: string) {
     const num = Number(value);
     return Number.isFinite(num) ? num : value;
   }
-  if (field.key === "autoApproveInTestMode" || field.key === "allowPartial") {
+  if (
+    field.key === "autoApproveInTestMode" ||
+    field.key === "allowPartial" ||
+    field.key === "autoCreateBaseline"
+  ) {
     return value === "true";
   }
   return value;

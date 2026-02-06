@@ -1,6 +1,12 @@
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
-import { getUserByUsername, resolvePermissionsForRole, verifyUserCredentials } from "./authzStore.js";
+import {
+  getUserByUsername,
+  needsTwoFactor,
+  resolvePermissionsForRole,
+  verifyUserCredentials,
+  verifyUserTotp
+} from "./authzStore.js";
 
 const jwtSecret = process.env.JWT_SECRET || "dev_secret";
 const failedAttempts = new Map<string, { count: number; lockUntil: number }>();
@@ -17,6 +23,13 @@ export type AuthContext = {
   role: string;
   permissions: string[];
 };
+
+export type LoginResult =
+  | { status: "ok"; auth: AuthContext }
+  | { status: "invalid" }
+  | { status: "locked" }
+  | { status: "totp_required" }
+  | { status: "totp_invalid" };
 
 export function signToken(payload: AuthTokenPayload) {
   return jwt.sign(payload, jwtSecret, { expiresIn: "12h" });
@@ -66,25 +79,37 @@ export function getAuthContext(req: Request) {
   return ((req as any).auth || null) as AuthContext | null;
 }
 
-export async function verifyLogin(username: string, password: string) {
+export async function verifyLogin(username: string, password: string, totpCode?: string): Promise<LoginResult> {
   const now = Date.now();
   const state = failedAttempts.get(username);
 
   if (state && state.lockUntil > now) {
     console.warn(`[auth] login rejected (locked): ${username}`);
-    return null;
+    return { status: "locked" };
   }
 
   const user = await verifyUserCredentials(username, password);
   if (user) {
+    if (needsTwoFactor(user)) {
+      if (!totpCode?.trim()) {
+        return { status: "totp_required" };
+      }
+      if (!verifyUserTotp(user, totpCode)) {
+        registerFailure(username);
+        return { status: "totp_invalid" };
+      }
+    }
     failedAttempts.delete(username);
     const permissions = await resolvePermissionsForRole(user.role);
-    return { username: user.username, role: user.role, permissions } satisfies AuthContext;
+    return {
+      status: "ok",
+      auth: { username: user.username, role: user.role, permissions } satisfies AuthContext
+    };
   }
 
   registerFailure(username);
   console.warn(`[auth] login failed: ${username}`);
-  return null;
+  return { status: "invalid" };
 }
 
 function registerFailure(username: string) {

@@ -3,6 +3,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import os from "os";
+import { randomUUID } from "crypto";
 import { WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
@@ -36,8 +37,12 @@ import {
 import { buildSchedulePreview, buildUpcomingRuns, listSchedulePresets } from "./lib/schedulePreview.js";
 import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
 import {
+  beginTwoFactorSetup,
+  confirmTwoFactorSetup,
   createUser,
   deleteUser,
+  disableTwoFactor,
+  getTwoFactorStatus,
   listRoles,
   listUsers,
   updateUser,
@@ -54,6 +59,22 @@ import {
 import { dispatchWebhookTest } from "./lib/webhooks.js";
 import { collectHealth } from "./lib/health.js";
 import { appendAuditEvent, listAuditEvents } from "./lib/auditStore.js";
+import {
+  attachCollaborationWs,
+  createWorkflowComment,
+  deleteWorkflowComment,
+  listWorkflowComments,
+  listWorkflowPresence
+} from "./lib/collaboration.js";
+import {
+  createIntegration,
+  deleteIntegration,
+  getIntegration,
+  listIntegrations,
+  parseCsvRows,
+  testIntegrationConnection,
+  updateIntegration
+} from "./lib/integrationStore.js";
 import {
   ObservabilityRegistry,
   createStructuredLogger,
@@ -104,6 +125,7 @@ const loginLimiter = rateLimit({
 app.use("/api", apiLimiter);
 
 attachRecorderWs(wss);
+attachCollaborationWs(wss);
 
 app.use("/recordings", express.static("/recordings"));
 app.use("/artifacts", express.static("/app/artifacts"));
@@ -111,6 +133,9 @@ app.use("/artifacts", express.static("/app/artifacts"));
 app.use((req, res, next) => {
   const startedNs = process.hrtime.bigint();
   const requestPath = normalizeRequestPath(req.path || req.originalUrl.split("?")[0] || "/");
+  const requestId = String(req.headers["x-request-id"] || randomUUID());
+  (req as any).requestId = requestId;
+  res.setHeader("x-request-id", requestId);
   observability.incrementGauge("forgeflow_http_in_flight_requests", 1);
 
   res.on("finish", () => {
@@ -132,6 +157,7 @@ app.use((req, res, next) => {
 
     if (requestLogsEnabled && requestPath !== "/metrics") {
       logger.info("http.request", {
+        requestId,
         method: req.method,
         path: requestPath,
         statusCode: res.statusCode,
@@ -211,7 +237,7 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
     }
   }
 
-  const schema = z.object({ username: z.string(), password: z.string() });
+  const schema = z.object({ username: z.string(), password: z.string(), totpCode: z.string().optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     await appendAuditEvent({
@@ -225,20 +251,36 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
-  const { username, password } = parsed.data;
-  const authUser = await verifyLogin(username, password);
-  if (!authUser) {
+  const { username, password, totpCode } = parsed.data;
+  const loginResult = await verifyLogin(username, password, totpCode);
+  if (loginResult.status !== "ok") {
+    if (loginResult.status === "totp_required") {
+      res.status(428).json({ error: "Two-factor code required", requires2fa: true });
+      return;
+    }
+    if (loginResult.status === "totp_invalid") {
+      res.status(401).json({ error: "Invalid two-factor code" });
+      return;
+    }
     await appendAuditEvent({
       actorUsername: username,
       actorRole: "unknown",
       action: "auth.login",
       resourceType: "auth",
       success: false,
-      message: "Invalid credentials or temporarily locked account"
+      message:
+        loginResult.status === "locked"
+          ? "Account temporarily locked"
+          : "Invalid credentials"
     });
-    res.status(401).json({ error: "Invalid credentials or temporarily locked account" });
+    if (loginResult.status === "locked") {
+      res.status(429).json({ error: "Account temporarily locked. Try again later." });
+      return;
+    }
+    res.status(401).json({ error: "Invalid credentials" });
     return;
   }
+  const authUser = loginResult.auth;
   const token = signToken({ username: authUser.username, role: authUser.role });
   await appendAuditEvent({
     actorUsername: authUser.username,
@@ -259,6 +301,110 @@ app.get("/api/auth/me", (req, res) => {
     return;
   }
   res.json(auth);
+});
+
+app.get("/api/auth/2fa/status", async (req, res) => {
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  try {
+    const status = await getTwoFactorStatus(auth.username);
+    res.json(status);
+  } catch (error) {
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.post("/api/auth/2fa/setup", async (req, res) => {
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  try {
+    const setup = await beginTwoFactorSetup(auth.username);
+    await writeAuditEvent(req, {
+      action: "auth.2fa.setup",
+      resourceType: "auth",
+      resourceId: auth.username
+    });
+    res.json(setup);
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "auth.2fa.setup",
+      resourceType: "auth",
+      resourceId: auth.username,
+      success: false,
+      message: String(error)
+    });
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.post("/api/auth/2fa/verify-setup", async (req, res) => {
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const schema = z.object({ token: z.string().min(6) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const user = await confirmTwoFactorSetup(auth.username, parsed.data.token);
+    await writeAuditEvent(req, {
+      action: "auth.2fa.enable",
+      resourceType: "auth",
+      resourceId: auth.username
+    });
+    res.json({ ok: true, user });
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "auth.2fa.enable",
+      resourceType: "auth",
+      resourceId: auth.username,
+      success: false,
+      message: String(error)
+    });
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.post("/api/auth/2fa/disable", async (req, res) => {
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const schema = z.object({ token: z.string().min(6) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const user = await disableTwoFactor(auth.username, parsed.data.token);
+    await writeAuditEvent(req, {
+      action: "auth.2fa.disable",
+      resourceType: "auth",
+      resourceId: auth.username
+    });
+    res.json({ ok: true, user });
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "auth.2fa.disable",
+      resourceType: "auth",
+      resourceId: auth.username,
+      success: false,
+      message: String(error)
+    });
+    res.status(400).json({ error: String(error) });
+  }
 });
 
 const canReadWorkflows = requirePermission("workflows:read");
@@ -295,10 +441,15 @@ async function writeAuditEvent(
 ) {
   try {
     const auth = getAuthContext(req);
+    const requestId = String((req as any).requestId || "");
     await appendAuditEvent({
       actorUsername: auth?.username || "system",
       actorRole: auth?.role || "system",
-      ...payload
+      ...payload,
+      metadata: {
+        requestId,
+        ...(payload.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>) : {})
+      }
     });
   } catch (error) {
     logger.error("audit.write_failed", { error });
@@ -363,6 +514,256 @@ app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => 
 app.get("/api/workflows", canReadWorkflows, async (_req, res) => {
   const workflows = await prisma.workflow.findMany({ orderBy: { updatedAt: "desc" } });
   res.json(workflows);
+});
+
+app.get("/api/workflows/:id/collab/presence", canReadWorkflows, (req, res) => {
+  res.json({
+    workflowId: req.params.id,
+    presence: listWorkflowPresence(req.params.id)
+  });
+});
+
+app.get("/api/workflows/:id/comments", canReadWorkflows, async (req, res) => {
+  const comments = await listWorkflowComments(req.params.id);
+  res.json(comments);
+});
+
+app.post("/api/workflows/:id/comments", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({
+    message: z.string().min(1),
+    nodeId: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  try {
+    const comment = await createWorkflowComment({
+      workflowId: req.params.id,
+      message: parsed.data.message,
+      nodeId: parsed.data.nodeId,
+      author: auth
+    });
+    await writeAuditEvent(req, {
+      action: "workflow.comment.create",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      metadata: {
+        commentId: comment.id,
+        nodeId: comment.nodeId || null
+      }
+    });
+    res.json(comment);
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "workflow.comment.create",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.delete("/api/workflows/:id/comments/:commentId", canWriteWorkflows, async (req, res) => {
+  const auth = getAuthContext(req);
+  if (!auth) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  try {
+    const removed = await deleteWorkflowComment({
+      workflowId: req.params.id,
+      commentId: req.params.commentId,
+      actor: auth
+    });
+    if (!removed) {
+      res.status(404).json({ error: "Comment not found" });
+      return;
+    }
+    await writeAuditEvent(req, {
+      action: "workflow.comment.delete",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      metadata: {
+        commentId: req.params.commentId
+      }
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "workflow.comment.delete",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error),
+      metadata: {
+        commentId: req.params.commentId
+      }
+    });
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.get("/api/workflows/:id/history", canReadWorkflows, async (req, res) => {
+  const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 80;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(400, Math.floor(limitRaw))) : 80;
+  const versions = await prisma.workflowVersion.findMany({
+    where: { workflowId: req.params.id },
+    orderBy: { version: "desc" },
+    take: Math.min(60, limit)
+  });
+  const events = (await listAuditEvents({
+    limit: 1000,
+    resourceType: "workflow"
+  }))
+    .filter((entry) => entry.resourceId === req.params.id)
+    .slice(0, limit);
+
+  res.json({
+    workflowId: req.params.id,
+    versions: versions.map((version) => ({
+      id: version.id,
+      version: version.version,
+      status: version.status,
+      notes: version.notes || "",
+      createdAt: version.createdAt
+    })),
+    events
+  });
+});
+
+app.get("/api/integrations", canWriteWorkflows, async (_req, res) => {
+  const integrations = await listIntegrations();
+  res.json(integrations);
+});
+
+app.post("/api/integrations", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({
+    name: z.string().min(1),
+    type: z.enum(["postgresql", "mysql", "mongodb", "google_sheets", "airtable", "s3", "http_api"]),
+    config: z.record(z.string(), z.any()).optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const integration = await createIntegration(parsed.data as any);
+    await writeAuditEvent(req, {
+      action: "integration.create",
+      resourceType: "integration",
+      resourceId: integration.id,
+      metadata: {
+        name: integration.name,
+        type: integration.type
+      }
+    });
+    res.json(integration);
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "integration.create",
+      resourceType: "integration",
+      success: false,
+      message: String(error)
+    });
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.put("/api/integrations/:id", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({
+    name: z.string().optional(),
+    type: z.enum(["postgresql", "mysql", "mongodb", "google_sheets", "airtable", "s3", "http_api"]).optional(),
+    config: z.record(z.string(), z.any()).optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const integration = await updateIntegration(req.params.id, parsed.data as any);
+    await writeAuditEvent(req, {
+      action: "integration.update",
+      resourceType: "integration",
+      resourceId: integration.id
+    });
+    res.json(integration);
+  } catch (error) {
+    await writeAuditEvent(req, {
+      action: "integration.update",
+      resourceType: "integration",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
+    res.status(400).json({ error: String(error) });
+  }
+});
+
+app.delete("/api/integrations/:id", canWriteWorkflows, async (req, res) => {
+  const removed = await deleteIntegration(req.params.id);
+  if (!removed) {
+    res.status(404).json({ error: "Integration not found" });
+    return;
+  }
+  await writeAuditEvent(req, {
+    action: "integration.delete",
+    resourceType: "integration",
+    resourceId: req.params.id
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/integrations/:id/test", canWriteWorkflows, async (req, res) => {
+  const integration = await getIntegration(req.params.id);
+  if (!integration) {
+    res.status(404).json({ error: "Integration not found" });
+    return;
+  }
+  const result = await testIntegrationConnection(integration);
+  await writeAuditEvent(req, {
+    action: "integration.test",
+    resourceType: "integration",
+    resourceId: integration.id,
+    metadata: result
+  });
+  res.json(result);
+});
+
+app.post("/api/integrations/import/csv", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({
+    text: z.string().optional(),
+    filePath: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  let csvText = String(parsed.data.text || "");
+  if (!csvText && parsed.data.filePath) {
+    const fs = await import("fs/promises");
+    csvText = await fs.readFile(parsed.data.filePath, "utf8");
+  }
+  if (!csvText.trim()) {
+    res.status(400).json({ error: "CSV text or filePath is required" });
+    return;
+  }
+  const rows = parseCsvRows(csvText);
+  res.json({
+    rows,
+    count: rows.length
+  });
 });
 
 app.post("/api/workflows", canWriteWorkflows, async (req, res) => {

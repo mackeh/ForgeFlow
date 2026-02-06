@@ -17,9 +17,14 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 - Schedule dependency chains and maintenance windows
 - Daily/hourly performance trends, failure analysis, and server resource usage dashboard
 - Local auth, role permissions, webhook events, rate limiting
+- Enterprise collaboration: live viewer/editor presence, workflow comments, attributed change history
+- Data source integrations: connector registry, connectivity test, CSV import utility, integration request node
+- Visual regression testing node with baseline capture and threshold-based comparison
+- Enhanced debugging: variable inspector, network inspector, screenshot/DOM/visual artifact galleries
+- Optional TOTP 2FA with setup/verify/disable flow and QR setup link
 - Persistent audit logging with admin audit viewer/API
 - Local LLM data transform support via Ollama
-- Structured JSON request logs + Prometheus-compatible `/metrics` endpoint
+- Structured JSON request logs, request IDs for traceability, and Prometheus-compatible `/metrics` endpoint
 
 ## Priority Status
 Priority 1 (`Quick Wins`) is implemented:
@@ -37,12 +42,24 @@ Priority 2 (`Game-Changing Features`) is implemented:
 - Enhanced scheduling (calendar/upcoming runs, presets, dependency chains, maintenance windows)
 - Workflow template library (web/data/desktop patterns)
 
+Priority 3 (`Enterprise Features`) is implemented:
+- Multi-user collaboration primitives (presence + comments + change history with attribution)
+- Data source integration framework (PostgreSQL/MySQL/MongoDB/HTTP API/Airtable/S3/Sheets profiles + test endpoint)
+- Visual regression testing support via `playwright_visual_assert`
+- Enhanced debugging tools (variable inspector + network inspector + artifact galleries)
+- Two-factor authentication (TOTP) and compliance-grade audit trails
+- Observability enhancements with request IDs in logs/audit metadata
+
 ## Recent Updates
 - Added persistent audit logging with retention controls (`AUDIT_FILE`, `AUDIT_MAX_EVENTS`)
 - Added schedule presets and local-time next-run preview
 - Added admin audit endpoint and sidebar audit log viewer
 - Added observability primitives: structured logs and Prometheus metrics export
 - Added startup-ready login guard to prevent transient auth/API errors during boot
+- Added collaboration APIs/WebSocket presence and workflow comments/history
+- Added integration registry/test APIs and CSV import helper
+- Added TOTP-based 2FA setup/verify/disable with login enforcement
+- Added request ID propagation for traceable logs and audit events
 
 ## Services
 - `web` UI: `http://localhost:5173`
@@ -123,6 +140,9 @@ docker compose logs -f
 - Schedule calendar: `/api/schedules/upcoming?workflowId=<id>&days=14&limit=80&perSchedule=6`
 - Metrics: `/api/metrics/dashboard`
 - Runtime metrics: `/metrics` (Prometheus text format)
+- Collaboration: `/api/workflows/:id/collab/presence`, `/api/workflows/:id/comments`, `/api/workflows/:id/history`
+- Integrations: `/api/integrations*`, `/api/integrations/:id/test`, `/api/integrations/import/csv`
+- 2FA: `/api/auth/2fa/status`, `/api/auth/2fa/setup`, `/api/auth/2fa/verify-setup`, `/api/auth/2fa/disable`
 - Secrets: `/api/secrets*`
 - Recorders: `/api/recorders/web/start`, `/api/recorders/desktop/start`, `/api/recorders/desktop/stop`
 - Admin/RBAC: `/api/admin/users*`, `/api/admin/roles*`

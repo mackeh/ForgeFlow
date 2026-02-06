@@ -133,7 +133,11 @@ export function attachRecorderWs(wss: WebSocketServer) {
     const type = url.searchParams.get("type");
     const sessionId = url.searchParams.get("sessionId");
 
-    if (type !== "recorder" || !sessionId) {
+    if (type !== "recorder") {
+      return;
+    }
+
+    if (!sessionId) {
       ws.close();
       return;
     }

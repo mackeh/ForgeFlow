@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import argon2 from "argon2";
 import bcrypt from "bcryptjs";
+import { buildOtpAuthUri, buildQrCodeUrl, generateTotpSecret, verifyTotpToken } from "./totp.js";
 
 export const defaultRolePermissions: Record<string, string[]> = {
   admin: ["*"],
@@ -26,6 +27,9 @@ export type LocalUser = {
   role: string;
   passwordHashArgon2: string;
   disabled: boolean;
+  twoFactorEnabled: boolean;
+  twoFactorSecret?: string | null;
+  twoFactorTempSecret?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -60,6 +64,9 @@ async function bootstrapAdminUser() {
     role: "admin",
     passwordHashArgon2,
     disabled: false,
+    twoFactorEnabled: false,
+    twoFactorSecret: null,
+    twoFactorTempSecret: null,
     createdAt: now,
     updatedAt: now
   };
@@ -87,7 +94,18 @@ async function readStore(): Promise<AuthzStore> {
   const raw = await readFile(authzFile, "utf8");
   try {
     const parsed = JSON.parse(raw) as AuthzStore;
-    const users = Array.isArray(parsed.users) ? parsed.users : [];
+    const users = Array.isArray(parsed.users)
+      ? parsed.users.map((user) => ({
+          ...user,
+          twoFactorEnabled: Boolean((user as any).twoFactorEnabled),
+          twoFactorSecret:
+            (user as any).twoFactorSecret === undefined ? null : ((user as any).twoFactorSecret as string | null),
+          twoFactorTempSecret:
+            (user as any).twoFactorTempSecret === undefined
+              ? null
+              : ((user as any).twoFactorTempSecret as string | null)
+        }))
+      : [];
     const roles = parsed.roles && typeof parsed.roles === "object" ? parsed.roles : {};
     return {
       users,
@@ -116,6 +134,7 @@ export function sanitizeUser(user: LocalUser) {
     username: user.username,
     role: user.role,
     disabled: user.disabled,
+    twoFactorEnabled: Boolean(user.twoFactorEnabled),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };
@@ -164,6 +183,9 @@ export async function createUser(payload: {
     role,
     passwordHashArgon2: await hashPassword(payload.password),
     disabled: Boolean(payload.disabled),
+    twoFactorEnabled: false,
+    twoFactorSecret: null,
+    twoFactorTempSecret: null,
     createdAt: now,
     updatedAt: now
   };
@@ -179,6 +201,7 @@ export async function updateUser(
     role: string;
     password: string;
     disabled: boolean;
+    twoFactorEnabled: boolean;
   }>
 ) {
   const store = await readStore();
@@ -210,6 +233,12 @@ export async function updateUser(
 
   if (patch.disabled !== undefined) {
     next.disabled = Boolean(patch.disabled);
+  }
+
+  if (patch.twoFactorEnabled !== undefined && !patch.twoFactorEnabled) {
+    next.twoFactorEnabled = false;
+    next.twoFactorSecret = null;
+    next.twoFactorTempSecret = null;
   }
 
   store.users[idx] = next;
@@ -278,6 +307,104 @@ export async function verifyUserCredentials(username: string, password: string) 
   }
   const ok = await verifyAgainstHash(user.passwordHashArgon2, password);
   return ok ? user : null;
+}
+
+export async function beginTwoFactorSetup(username: string) {
+  const store = await readStore();
+  const idx = store.users.findIndex((user) => user.username === username);
+  if (idx < 0) {
+    throw new Error("User not found");
+  }
+  const secret = generateTotpSecret();
+  const user = {
+    ...store.users[idx],
+    twoFactorTempSecret: secret,
+    updatedAt: new Date().toISOString()
+  };
+  store.users[idx] = user;
+  await writeStore(store);
+  const issuer = process.env.TOTP_ISSUER || "ForgeFlow";
+  const otpauthUrl = buildOtpAuthUri({
+    issuer,
+    accountName: user.username,
+    secret
+  });
+  return {
+    secret,
+    otpauthUrl,
+    qrCodeUrl: buildQrCodeUrl(otpauthUrl)
+  };
+}
+
+export async function confirmTwoFactorSetup(username: string, token: string) {
+  const store = await readStore();
+  const idx = store.users.findIndex((user) => user.username === username);
+  if (idx < 0) {
+    throw new Error("User not found");
+  }
+  const current = store.users[idx];
+  const secret = String(current.twoFactorTempSecret || "");
+  if (!secret) {
+    throw new Error("No pending 2FA setup");
+  }
+  if (!verifyTotpToken(secret, token.trim(), { window: 1 })) {
+    throw new Error("Invalid 2FA token");
+  }
+  store.users[idx] = {
+    ...current,
+    twoFactorEnabled: true,
+    twoFactorSecret: secret,
+    twoFactorTempSecret: null,
+    updatedAt: new Date().toISOString()
+  };
+  await writeStore(store);
+  return sanitizeUser(store.users[idx]);
+}
+
+export async function disableTwoFactor(username: string, token: string) {
+  const store = await readStore();
+  const idx = store.users.findIndex((user) => user.username === username);
+  if (idx < 0) {
+    throw new Error("User not found");
+  }
+  const current = store.users[idx];
+  const secret = String(current.twoFactorSecret || "");
+  if (!current.twoFactorEnabled || !secret) {
+    throw new Error("2FA is not enabled");
+  }
+  if (!verifyTotpToken(secret, token.trim(), { window: 1 })) {
+    throw new Error("Invalid 2FA token");
+  }
+  store.users[idx] = {
+    ...current,
+    twoFactorEnabled: false,
+    twoFactorSecret: null,
+    twoFactorTempSecret: null,
+    updatedAt: new Date().toISOString()
+  };
+  await writeStore(store);
+  return sanitizeUser(store.users[idx]);
+}
+
+export async function getTwoFactorStatus(username: string) {
+  const user = await getUserByUsername(username);
+  if (!user) {
+    throw new Error("User not found");
+  }
+  return {
+    enabled: Boolean(user.twoFactorEnabled),
+    pending: Boolean(user.twoFactorTempSecret)
+  };
+}
+
+export function needsTwoFactor(user: LocalUser) {
+  return Boolean(user.twoFactorEnabled && user.twoFactorSecret);
+}
+
+export function verifyUserTotp(user: LocalUser, token: string) {
+  const secret = String(user.twoFactorSecret || "");
+  if (!secret) return false;
+  return verifyTotpToken(secret, token.trim(), { window: 1 });
 }
 
 export async function getAuthzSnapshot() {

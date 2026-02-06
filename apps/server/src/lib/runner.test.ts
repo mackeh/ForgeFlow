@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  compareVisualBuffers,
   buildSelectorAiPrompt,
   buildSelectorCandidates,
   evaluateCondition,
@@ -123,4 +124,18 @@ test("selectorTextToCandidate parses role forms with optional name", () => {
     kind: "role",
     role: "link"
   });
+});
+
+test("compareVisualBuffers computes diff percentages deterministically", () => {
+  const same = compareVisualBuffers(Buffer.from([1, 2, 3, 4]), Buffer.from([1, 2, 3, 4]));
+  assert.equal(same.diffBytes, 0);
+  assert.equal(same.diffPct, 0);
+
+  const changed = compareVisualBuffers(Buffer.from([1, 2, 3, 4]), Buffer.from([1, 9, 3, 8]));
+  assert.equal(changed.diffBytes, 2);
+  assert.equal(changed.totalBytes, 4);
+  assert.equal(changed.diffPct, 50);
+
+  const mismatch = compareVisualBuffers(Buffer.from([1, 2]), Buffer.from([1, 2, 3]));
+  assert.equal(mismatch.diffPct, 100);
 });

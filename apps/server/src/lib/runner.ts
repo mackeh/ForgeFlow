@@ -1,4 +1,4 @@
-import { mkdir } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import type { PrismaClient, Run } from "@prisma/client";
 import { chromium, type Browser, type Page } from "playwright";
@@ -10,6 +10,7 @@ import {
   validateWithSchema
 } from "./validation.js";
 import { dispatchWebhookEvent } from "./webhooks.js";
+import { getIntegration, parseCsvRows } from "./integrationStore.js";
 
 const agentBaseUrl = process.env.AGENT_BASE_URL || "http://agent:7001";
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://ollama:11434";
@@ -32,6 +33,17 @@ type ExecutionContext = {
   __validationCache?: Record<string, boolean>;
   __branches?: Record<string, { result: boolean; targetId?: string; evaluatedAt: string }>;
   __loopMeta?: Record<string, { count: number; itemKey: string; indexKey: string; outputKey: string }>;
+  __networkLogs?: Array<{
+    nodeId: string;
+    kind: "http_request" | "integration_request";
+    method: string;
+    url: string;
+    status?: number;
+    ok?: boolean;
+    durationMs?: number;
+    at: string;
+    error?: string;
+  }>;
 };
 
 type ExecutionDefaults = {
@@ -390,15 +402,18 @@ async function runNodeWithRetry(args: {
     stateAttempts = attempt;
     try {
       const result = await withTimeout(
-        executeNode({
-          prisma,
-          node,
-          context,
-          executionDefaults,
-          browser: currentBrowser,
-          page: currentPage,
-          setBrowserAndPage: (b, p) => {
-            currentBrowser = b;
+          executeNode({
+            prisma,
+            node,
+            context,
+            executionDefaults,
+            runId,
+            artifacts,
+            logs,
+            browser: currentBrowser,
+            page: currentPage,
+            setBrowserAndPage: (b, p) => {
+              currentBrowser = b;
             currentPage = p;
             setBrowserAndPage(b, p);
           },
@@ -435,12 +450,27 @@ async function executeNode(args: {
   node: any;
   context: ExecutionContext;
   executionDefaults?: ExecutionDefaults;
+  runId: string;
+  artifacts: Array<Record<string, unknown>>;
+  logs: Array<Record<string, unknown>>;
   browser: Browser | null;
   page: Page | null;
   setBrowserAndPage: (browser: Browser | null, page: Page | null) => void;
   testMode: boolean;
 }): Promise<{ outputKey?: string }> {
-  const { prisma, node, context, executionDefaults, browser, page, setBrowserAndPage, testMode } = args;
+  const {
+    prisma,
+    node,
+    context,
+    executionDefaults,
+    runId,
+    artifacts,
+    logs,
+    browser,
+    page,
+    setBrowserAndPage,
+    testMode
+  } = args;
   const nodeTypeValue = nodeType(node);
 
   switch (nodeTypeValue) {
@@ -453,8 +483,25 @@ async function executeNode(args: {
       return { outputKey: key };
     }
     case "http_request": {
-      await runHttp(prisma, node.data, context);
+      await runHttp(prisma, node.data, context, { nodeId: String(node.id) });
       return { outputKey: node.data?.saveAs };
+    }
+    case "integration_request": {
+      await runIntegrationRequest(prisma, node.data, context, { nodeId: String(node.id) });
+      return { outputKey: node.data?.saveAs };
+    }
+    case "data_import_csv": {
+      const outputKey = String(node.data?.outputKey || "csvRows");
+      const textRaw = node.data?.text ? await interpolateWithSecrets(node.data.text, context, prisma) : "";
+      const pathRaw = node.data?.filePath
+        ? String(await interpolateWithSecrets(node.data.filePath, context, prisma))
+        : "";
+      const csvText = String(textRaw || "").trim() ? String(textRaw) : pathRaw ? await readFile(pathRaw, "utf8") : "";
+      if (!String(csvText || "").trim()) {
+        throw new Error("data_import_csv requires either text or filePath");
+      }
+      context[outputKey] = parseCsvRows(csvText);
+      return { outputKey };
     }
     case "transform_llm": {
       await runLlm(node.data, context);
@@ -686,6 +733,20 @@ async function executeNode(args: {
       context[saveAs] = value;
       return { outputKey: saveAs };
     }
+    case "playwright_visual_assert": {
+      const headless = resolvePlaywrightHeadless(node, executionDefaults);
+      const ensured = await ensurePage(browser, page, headless);
+      setBrowserAndPage(ensured.browser, ensured.page);
+      const result = await runVisualAssert({
+        page: ensured.page,
+        node,
+        context,
+        runId,
+        artifacts,
+        logs
+      });
+      return { outputKey: result.outputKey };
+    }
     case "desktop_click":
     case "desktop_click_image":
     case "desktop_type":
@@ -698,11 +759,19 @@ async function executeNode(args: {
   }
 }
 
-async function runHttp(prisma: PrismaClient, data: any, context: ExecutionContext) {
+async function runHttp(
+  prisma: PrismaClient,
+  data: any,
+  context: ExecutionContext,
+  meta: {
+    nodeId: string;
+  }
+) {
   const url = String(await interpolateWithSecrets(data?.url, context, prisma));
   const method = String(data?.method || "GET").toUpperCase();
   const headers = (data?.headers || {}) as Record<string, string>;
   const body = data?.body ? await resolveTemplateObject(data.body, context, prisma) : undefined;
+  const started = Date.now();
 
   const res = await fetch(url, {
     method,
@@ -716,9 +785,109 @@ async function runHttp(prisma: PrismaClient, data: any, context: ExecutionContex
   if (data?.saveAs) {
     context[data.saveAs] = payload;
   }
+  appendNetworkLog(context, {
+    nodeId: meta.nodeId,
+    kind: "http_request",
+    method,
+    url,
+    status: res.status,
+    ok: res.ok,
+    durationMs: Date.now() - started
+  });
   if (!res.ok) {
     throw new Error(`HTTP ${method} ${url} failed with status ${res.status}`);
   }
+}
+
+async function runIntegrationRequest(
+  prisma: PrismaClient,
+  data: any,
+  context: ExecutionContext,
+  meta: {
+    nodeId: string;
+  }
+) {
+  const integrationId = String(data?.integrationId || "").trim();
+  if (!integrationId) {
+    throw new Error("integration_request missing integrationId");
+  }
+  const integration = await getIntegration(integrationId);
+  if (!integration) {
+    throw new Error(`Integration not found: ${integrationId}`);
+  }
+
+  const config = integration.config || {};
+  const method = String(data?.method || "GET").toUpperCase();
+  const pathValue = String(await interpolateWithSecrets(data?.path || "", context, prisma));
+  const explicitUrl = data?.url ? String(await interpolateWithSecrets(data.url, context, prisma)) : "";
+  const baseUrl = String(config.baseUrl || "");
+  const url =
+    explicitUrl ||
+    (baseUrl
+      ? `${baseUrl.replace(/\/+$/, "")}/${pathValue.replace(/^\/+/, "")}`
+      : pathValue);
+  if (!url) {
+    throw new Error("integration_request could not resolve URL (need url or integration.baseUrl/path)");
+  }
+
+  const headers: Record<string, string> = {
+    ...(data?.headers || {})
+  };
+  if (config.bearerToken && !headers.Authorization) {
+    headers.Authorization = `Bearer ${String(config.bearerToken)}`;
+  }
+  if (config.apiKey && config.apiKeyHeader && !headers[String(config.apiKeyHeader)]) {
+    headers[String(config.apiKeyHeader)] = String(config.apiKey);
+  }
+
+  const body = data?.body ? await resolveTemplateObject(data.body, context, prisma) : undefined;
+  const started = Date.now();
+  const response = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (data?.saveAs) {
+    context[String(data.saveAs)] = payload;
+  }
+  appendNetworkLog(context, {
+    nodeId: meta.nodeId,
+    kind: "integration_request",
+    method,
+    url,
+    status: response.status,
+    ok: response.ok,
+    durationMs: Date.now() - started
+  });
+  if (!response.ok) {
+    throw new Error(`Integration request failed (${response.status})`);
+  }
+}
+
+function appendNetworkLog(
+  context: ExecutionContext,
+  entry: {
+    nodeId: string;
+    kind: "http_request" | "integration_request";
+    method: string;
+    url: string;
+    status?: number;
+    ok?: boolean;
+    durationMs?: number;
+    error?: string;
+  }
+) {
+  const logs = Array.isArray(context.__networkLogs) ? context.__networkLogs : [];
+  logs.push({
+    ...entry,
+    at: new Date().toISOString()
+  });
+  if (logs.length > 200) {
+    logs.splice(0, logs.length - 200);
+  }
+  context.__networkLogs = logs;
 }
 
 async function executeInlineTask(args: {
@@ -732,11 +901,34 @@ async function executeInlineTask(args: {
   const taskType = String(task?.type || "http_request");
 
   if (taskType === "http_request") {
-    await runHttp(prisma, task, context);
+    await runHttp(prisma, task, context, { nodeId: taskId });
     return {
       taskId,
       taskType,
       outputKey: task?.saveAs ? String(task.saveAs) : undefined
+    };
+  }
+
+  if (taskType === "integration_request") {
+    await runIntegrationRequest(prisma, task, context, { nodeId: taskId });
+    return {
+      taskId,
+      taskType,
+      outputKey: task?.saveAs ? String(task.saveAs) : undefined
+    };
+  }
+
+  if (taskType === "data_import_csv") {
+    const outputKey = String(task?.outputKey || "csvRows");
+    const csvText = String(task?.text || "");
+    if (!csvText.trim()) {
+      throw new Error(`${taskType} task ${taskId} requires text`);
+    }
+    context[outputKey] = parseCsvRows(csvText);
+    return {
+      taskId,
+      taskType,
+      outputKey
     };
   }
 
@@ -890,6 +1082,129 @@ async function ensurePage(browser: Browser | null, page: Page | null, headless: 
 function envPlaywrightHeadlessDefault() {
   const raw = String(process.env.PLAYWRIGHT_HEADLESS ?? "true").toLowerCase().trim();
   return !(raw === "0" || raw === "false" || raw === "no");
+}
+
+type VisualAssertResult = {
+  outputKey?: string;
+  diffPct: number;
+  thresholdPct: number;
+  baselinePath: string;
+  lastPath: string;
+};
+
+async function runVisualAssert(args: {
+  page: Page;
+  node: any;
+  context: ExecutionContext;
+  runId: string;
+  artifacts: Array<Record<string, unknown>>;
+  logs: Array<Record<string, unknown>>;
+}): Promise<VisualAssertResult> {
+  const { page, node, context, runId, artifacts, logs } = args;
+  const nodeId = String(node.id || "visual-node");
+  const data = node.data || {};
+  const baselineName = sanitizeFilename(String(data.baselineName || nodeId));
+  const thresholdPct = Number(data.thresholdPct ?? 0.5);
+  const autoCreateBaseline = data.autoCreateBaseline !== false;
+  const outputKey = data.outputKey ? String(data.outputKey) : "";
+  const baselineDir = process.env.VISUAL_BASELINE_DIR || path.join(artifactsRoot, "visual-baselines");
+  await mkdir(baselineDir, { recursive: true });
+  const baselinePath = path.join(baselineDir, `${baselineName}.png`);
+  const lastPath = path.join(baselineDir, `${baselineName}__last.png`);
+
+  const current = await captureVisualBuffer(page, data);
+  await writeFile(lastPath, current);
+  artifacts.push({
+    nodeId,
+    type: "visual_last",
+    path: lastPath,
+    createdAt: new Date().toISOString(),
+    runId
+  });
+
+  let baseline: Buffer | null = null;
+  try {
+    baseline = await readFile(baselinePath);
+  } catch {
+    baseline = null;
+  }
+
+  if (!baseline) {
+    if (!autoCreateBaseline) {
+      throw new Error(`Visual baseline not found for "${baselineName}"`);
+    }
+    await writeFile(baselinePath, current);
+    artifacts.push({
+      nodeId,
+      type: "visual_baseline_created",
+      path: baselinePath,
+      createdAt: new Date().toISOString(),
+      runId
+    });
+    if (outputKey) {
+      context[outputKey] = {
+        baselineCreated: true,
+        diffPct: 0,
+        thresholdPct
+      };
+    }
+    return { outputKey: outputKey || undefined, diffPct: 0, thresholdPct, baselinePath, lastPath };
+  }
+
+  const comparison = compareVisualBuffers(baseline, current);
+  if (outputKey) {
+    context[outputKey] = {
+      baselineCreated: false,
+      diffPct: comparison.diffPct,
+      thresholdPct,
+      diffBytes: comparison.diffBytes,
+      totalBytes: comparison.totalBytes
+    };
+  }
+  logs.push(
+    logEvent(nodeId, "playwright_visual_assert", "visual_compare", {
+      diffPct: comparison.diffPct,
+      thresholdPct,
+      diffBytes: comparison.diffBytes,
+      totalBytes: comparison.totalBytes
+    })
+  );
+
+  if (comparison.diffPct > thresholdPct) {
+    throw new Error(
+      `Visual regression failed for ${baselineName}: diff ${comparison.diffPct.toFixed(3)}% exceeds ${thresholdPct}%`
+    );
+  }
+  return { outputKey: outputKey || undefined, diffPct: comparison.diffPct, thresholdPct, baselinePath, lastPath };
+}
+
+async function captureVisualBuffer(page: Page, data: any) {
+  if (data?.selector) {
+    return page.locator(String(data.selector)).first().screenshot();
+  }
+  return page.screenshot({ fullPage: true });
+}
+
+function sanitizeFilename(value: string) {
+  return value.replace(/[^a-z0-9-_]+/gi, "_").replace(/^_+|_+$/g, "") || "baseline";
+}
+
+export function compareVisualBuffers(baseline: Buffer, current: Buffer) {
+  if (baseline.length !== current.length) {
+    const maxLength = Math.max(baseline.length, current.length);
+    return {
+      diffBytes: maxLength,
+      totalBytes: maxLength,
+      diffPct: 100
+    };
+  }
+  let diffBytes = 0;
+  for (let idx = 0; idx < baseline.length; idx += 1) {
+    if (baseline[idx] !== current[idx]) diffBytes += 1;
+  }
+  const totalBytes = baseline.length || 1;
+  const diffPct = Number(((diffBytes / totalBytes) * 100).toFixed(4));
+  return { diffBytes, totalBytes, diffPct };
 }
 
 export function resolvePlaywrightHeadless(node: any, executionDefaults?: ExecutionDefaults) {

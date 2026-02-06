@@ -132,6 +132,57 @@ button.is-loading {
   gap: 8px;
 }
 
+.twofactor-qr {
+  width: 132px;
+  height: 132px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  object-fit: contain;
+}
+
+.integration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collab-presence,
+.collab-comments,
+.collab-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.collab-item {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collab-item small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.collab-item button {
+  width: fit-content;
+  font-size: 11px;
+  margin-top: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 3px 7px;
+}
+
 .schedule-calendar {
   display: flex;
   flex-direction: column;

@@ -14,19 +14,26 @@ import "reactflow/dist/style.css";
 import {
   API_URL,
   approveRun,
+  beginTwoFactorSetup,
   clearToken,
   createAdminUser,
+  createIntegration,
+  createWorkflowComment,
   createWebhook,
   createWorkflow,
   createWorkflowFromTemplate,
   createSchedule,
   deleteAdminUser,
+  deleteIntegration,
   deleteSchedule,
   deleteWebhook,
+  deleteWorkflowComment,
   getDashboardMetrics,
+  getIntegrations,
   getAdminUsers,
   getAuditEvents,
   getCurrentUser,
+  getTwoFactorStatus,
   deleteWorkflow,
   getRoles,
   getRun,
@@ -39,9 +46,13 @@ import {
   getTemplates,
   getWebhookEvents,
   getWebhooks,
+  getWorkflowComments,
+  getWorkflowHistory,
+  getWorkflowPresence,
   getWorkflowRuns,
   getWorkflowVersions,
   getWorkflows,
+  importCsv,
   login,
   publishWorkflow,
   rollbackWorkflow,
@@ -53,12 +64,14 @@ import {
   startRecorder,
   startRun,
   stopDesktopRecorder,
+  testIntegration,
   testWebhook,
   updateAdminUser,
   updateRole,
   updateWebhook,
   updateSchedule,
-  updateWorkflow
+  updateWorkflow,
+  verifyTwoFactorSetup,
 } from "./api";
 import { ActionNode } from "./components/ActionNode";
 import { Sidebar } from "./components/Sidebar";
@@ -118,6 +131,64 @@ type RunArtifact = {
   error?: string;
 };
 
+type WorkflowPresence = {
+  clientId: string;
+  workflowId: string;
+  username: string;
+  role: string;
+  status: "viewing" | "editing";
+  currentNodeId?: string;
+  joinedAt: string;
+  lastSeenAt: string;
+};
+
+type WorkflowComment = {
+  id: string;
+  workflowId: string;
+  nodeId?: string;
+  message: string;
+  authorUsername: string;
+  authorRole: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type WorkflowHistory = {
+  workflowId: string;
+  versions: Array<{ id: string; version: number; status: string; notes?: string; createdAt: string }>;
+  events: Array<{
+    id: string;
+    at: string;
+    actorUsername: string;
+    actorRole: string;
+    action: string;
+    resourceType: string;
+    resourceId?: string;
+    success: boolean;
+    message?: string;
+  }>;
+};
+
+type IntegrationItem = {
+  id: string;
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type TwoFactorStatus = {
+  enabled: boolean;
+  pending: boolean;
+};
+
+type TwoFactorSetupPayload = {
+  secret: string;
+  otpauthUrl: string;
+  qrCodeUrl: string;
+};
+
 const defaultDefinition = {
   nodes: [
     {
@@ -163,6 +234,7 @@ function formatBytes(value: number | null | undefined) {
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
+  const [loginTotpCode, setLoginTotpCode] = useState("");
   const [workflowList, setWorkflowList] = useState<any[]>([]);
   const [activeWorkflow, setActiveWorkflow] = useState<any | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(defaultDefinition.nodes as Node[]);
@@ -185,6 +257,12 @@ export default function App() {
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState("all");
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [integrations, setIntegrations] = useState<IntegrationItem[]>([]);
+  const [integrationName, setIntegrationName] = useState("Primary API");
+  const [integrationType, setIntegrationType] = useState("http_api");
+  const [integrationConfigText, setIntegrationConfigText] = useState("{\"baseUrl\":\"https://example.com\"}");
+  const [csvImportText, setCsvImportText] = useState("name,email\nAlice,alice@example.com");
+  const [csvImportPath, setCsvImportPath] = useState("");
   const [scheduleName, setScheduleName] = useState("Daily Run");
   const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
   const [scheduleTimezone, setScheduleTimezone] = useState("");
@@ -218,11 +296,20 @@ export default function App() {
   const [uiLogs, setUiLogs] = useState<UiLogEntry[]>([]);
   const [loadingActions, setLoadingActions] = useState<Record<string, boolean>>({});
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const [collabPresence, setCollabPresence] = useState<WorkflowPresence[]>([]);
+  const [workflowComments, setWorkflowComments] = useState<WorkflowComment[]>([]);
+  const [workflowHistory, setWorkflowHistory] = useState<WorkflowHistory | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
+  const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetupPayload | null>(null);
+  const [twoFactorToken, setTwoFactorToken] = useState("");
 
   const nodesRef = useRef<Node[]>(nodes);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const toastIdRef = useRef(1);
   const logIdRef = useRef(1);
+  const collabSocketRef = useRef<WebSocket | null>(null);
+  const collabHeartbeatRef = useRef<number | null>(null);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -239,10 +326,13 @@ export default function App() {
       { label: "Conditional Branch", type: "conditional_branch" },
       { label: "Loop Iterate", type: "loop_iterate" },
       { label: "Parallel Execute", type: "parallel_execute" },
+      { label: "CSV Import", type: "data_import_csv" },
+      { label: "Integration Request", type: "integration_request" },
       { label: "Web Navigate", type: "playwright_navigate" },
       { label: "Web Click", type: "playwright_click" },
       { label: "Web Fill", type: "playwright_fill" },
       { label: "Web Extract", type: "playwright_extract" },
+      { label: "Web Visual Assert", type: "playwright_visual_assert" },
       { label: "Desktop Click", type: "desktop_click" },
       { label: "Desktop Click Image", type: "desktop_click_image" },
       { label: "Desktop Type", type: "desktop_type" },
@@ -300,6 +390,11 @@ export default function App() {
     [runArtifacts]
   );
 
+  const visualArtifacts = useMemo(
+    () => runArtifacts.filter((artifact) => String(artifact.type || "").startsWith("visual_")),
+    [runArtifacts]
+  );
+
   const failedNodes = useMemo(() => {
     if (!activeRun?.nodeStates || typeof activeRun.nodeStates !== "object" || Array.isArray(activeRun.nodeStates)) {
       return [] as Array<{ nodeId: string; error?: string; attempts?: number; durationMs?: number }>;
@@ -325,6 +420,27 @@ export default function App() {
       })
       .slice(0, 8);
   }, [activeRun?.id, activeRun?.logs]);
+
+  const runNetworkLogs = useMemo(() => {
+    const logs = Array.isArray(activeRun?.context?.__networkLogs) ? activeRun.context.__networkLogs : [];
+    return [...logs].reverse().slice(0, 12);
+  }, [activeRun?.id, activeRun?.context]);
+
+  const runContextEntries = useMemo(() => {
+    const ctx = activeRun?.context;
+    if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) return [];
+    return Object.entries(ctx as Record<string, unknown>)
+      .filter(([key]) => !key.startsWith("__"))
+      .map(([key, value]) => {
+        const type = Array.isArray(value) ? "array" : value === null ? "null" : typeof value;
+        const preview =
+          type === "string"
+            ? String(value).slice(0, 120)
+            : JSON.stringify(value)?.slice(0, 160) || String(value);
+        return { key, type, preview };
+      })
+      .slice(0, 30);
+  }, [activeRun?.id, activeRun?.context]);
 
   const runProgress = useMemo(() => {
     if (!activeRun?.nodeStates || typeof activeRun.nodeStates !== "object" || Array.isArray(activeRun.nodeStates)) {
@@ -405,6 +521,11 @@ export default function App() {
         setCurrentUser(user);
       })
       .catch(showError);
+    getTwoFactorStatus()
+      .then((status) => {
+        setTwoFactorStatus(status as TwoFactorStatus);
+      })
+      .catch(showError);
     refreshWorkflows().catch(showError);
     getSecrets()
       .then(setSecrets)
@@ -415,6 +536,11 @@ export default function App() {
         if (Array.isArray(list) && list.length && !selectedTemplateId) {
           setSelectedTemplateId(list[0].id);
         }
+      })
+      .catch(showError);
+    getIntegrations()
+      .then((list) => {
+        setIntegrations(Array.isArray(list) ? (list as IntegrationItem[]) : []);
       })
       .catch(showError);
     getSchedulePresets()
@@ -447,6 +573,83 @@ export default function App() {
     if (!token || !activeWorkflow?.id) return;
     refreshSchedules(activeWorkflow.id).catch(showError);
   }, [token, activeWorkflow?.id]);
+
+  useEffect(() => {
+    const existing = collabSocketRef.current;
+    if (existing) {
+      existing.close();
+      collabSocketRef.current = null;
+    }
+    if (collabHeartbeatRef.current !== null) {
+      window.clearInterval(collabHeartbeatRef.current);
+      collabHeartbeatRef.current = null;
+    }
+    if (!token || !activeWorkflow?.id) return;
+
+    const wsBase = API_URL.replace(/^http/i, "ws");
+    const wsUrl = `${wsBase}/ws?type=collab&workflowId=${encodeURIComponent(
+      activeWorkflow.id
+    )}&token=${encodeURIComponent(token)}`;
+    const socket = new WebSocket(wsUrl);
+    collabSocketRef.current = socket;
+
+    socket.onopen = () => {
+      socket.send(
+        JSON.stringify({
+          type: "collab:state",
+          payload: {
+            status: selectedNode ? "editing" : "viewing",
+            currentNodeId: selectedNode?.id || undefined
+          }
+        })
+      );
+    };
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data || "{}"));
+        if (message?.type === "collab:presence") {
+          setCollabPresence(Array.isArray(message?.payload?.presence) ? message.payload.presence : []);
+          return;
+        }
+        if (message?.type === "collab:ready") {
+          setCollabPresence(Array.isArray(message?.payload?.presence) ? message.payload.presence : []);
+        }
+      } catch {
+        // ignore malformed ws payloads
+      }
+    };
+
+    collabHeartbeatRef.current = window.setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "collab:ping" }));
+      }
+    }, 10_000);
+
+    return () => {
+      if (collabHeartbeatRef.current !== null) {
+        window.clearInterval(collabHeartbeatRef.current);
+        collabHeartbeatRef.current = null;
+      }
+      socket.close();
+      if (collabSocketRef.current === socket) {
+        collabSocketRef.current = null;
+      }
+    };
+  }, [token, activeWorkflow?.id]);
+
+  useEffect(() => {
+    const socket = collabSocketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({
+        type: "collab:state",
+        payload: {
+          status: selectedNode ? "editing" : "viewing",
+          currentNodeId: selectedNode?.id || undefined
+        }
+      })
+    );
+  }, [selectedNode?.id]);
 
   useEffect(() => {
     setWorkflowName(activeWorkflow?.name || "");
@@ -729,21 +932,32 @@ export default function App() {
     }
   };
 
+  const refreshWorkflowCollaboration = async (workflowId: string) => {
+    const [presenceResult, commentsResult, historyResult] = await Promise.all([
+      getWorkflowPresence(workflowId).catch(() => ({ workflowId, presence: [] })),
+      getWorkflowComments(workflowId).catch(() => []),
+      getWorkflowHistory(workflowId, 80).catch(() => ({ workflowId, versions: [], events: [] }))
+    ]);
+    setCollabPresence(Array.isArray(presenceResult?.presence) ? presenceResult.presence : []);
+    setWorkflowComments(Array.isArray(commentsResult) ? commentsResult : []);
+    setWorkflowHistory(historyResult as WorkflowHistory);
+  };
+
   const selectWorkflow = async (workflow: any) => {
     setActiveWorkflow(workflow);
     const def = workflow.draftDefinition || workflow.definition || defaultDefinition;
     setNodes(def.nodes || defaultDefinition.nodes);
     setEdges(def.edges || []);
-    await refreshWorkflowMeta(workflow.id);
+    await Promise.all([refreshWorkflowMeta(workflow.id), refreshWorkflowCollaboration(workflow.id)]);
   };
 
   const onConnect = (connection: Connection) => {
     setEdges((eds) => addEdge(connection, eds));
   };
 
-  const handleLogin = async (username: string, password: string) => {
+  const handleLogin = async (username: string, password: string, totpCode?: string) => {
     try {
-      const result = await login(username, password);
+      const result = await login(username, password, totpCode);
       const storedToken = localStorage.getItem("token");
       if (!storedToken) {
         throw new Error("Login failed: token was not stored");
@@ -752,7 +966,12 @@ export default function App() {
       setCurrentUser(me || result?.user || null);
       setToken(storedToken);
       setFeedback("Signed in", "success");
+      setLoginTotpCode("");
     } catch (err: any) {
+      if (err?.status === 428) {
+        setFeedback("Two-factor code required for this account", "info");
+        return;
+      }
       showError(err);
     }
   };
@@ -788,6 +1007,7 @@ export default function App() {
     setActiveWorkflow(null);
     setWorkflowList([]);
     setRuns([]);
+    setIntegrations([]);
     setActiveRun(null);
     setRunDiff(null);
     setVersions([]);
@@ -811,6 +1031,14 @@ export default function App() {
     setAuditEvents([]);
     setWebhookList([]);
     setWebhookEvents([]);
+    setCollabPresence([]);
+    setWorkflowComments([]);
+    setWorkflowHistory(null);
+    setCommentDraft("");
+    setTwoFactorStatus(null);
+    setTwoFactorSetup(null);
+    setTwoFactorToken("");
+    setLoginTotpCode("");
     setNodes(defaultDefinition.nodes as Node[]);
     setEdges(defaultDefinition.edges as Edge[]);
     setStatus("");
@@ -1016,10 +1244,13 @@ export default function App() {
       submit_guard: ["inputKey"],
       loop_iterate: ["inputKey"],
       parallel_execute: ["tasks"],
+      data_import_csv: ["outputKey"],
+      integration_request: ["integrationId"],
       playwright_navigate: ["url"],
       playwright_click: ["selector"],
       playwright_fill: ["selector", "value"],
       playwright_extract: ["selector", "saveAs"],
+      playwright_visual_assert: ["baselineName"],
       desktop_type: ["value"],
       desktop_click_image: ["imagePath"],
       desktop_wait_for_image: ["imagePath"]
@@ -1205,6 +1436,102 @@ export default function App() {
     setFeedback("Secret saved", "success");
   };
 
+  const handleCreateIntegration = async () => {
+    const name = integrationName.trim();
+    if (!name) {
+      setFeedback("Integration name is required", "error");
+      return;
+    }
+    let config: Record<string, unknown> = {};
+    const raw = integrationConfigText.trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          config = parsed as Record<string, unknown>;
+        } else {
+          throw new Error("Config must be a JSON object");
+        }
+      } catch (error) {
+        setFeedback(`Invalid integration config JSON: ${String(error)}`, "error");
+        return;
+      }
+    }
+    const created = await createIntegration({
+      name,
+      type: integrationType as any,
+      config
+    });
+    setIntegrations((prev) => [created as IntegrationItem, ...prev]);
+    setFeedback("Integration created", "success");
+  };
+
+  const handleDeleteIntegration = async (integrationId: string) => {
+    await deleteIntegration(integrationId);
+    setIntegrations((prev) => prev.filter((entry) => entry.id !== integrationId));
+    setFeedback("Integration deleted", "success");
+  };
+
+  const handleTestIntegration = async (integrationId: string) => {
+    const result = await testIntegration(integrationId);
+    if (result?.ok) {
+      setFeedback(`Integration OK: ${result.message}`, "success");
+    } else {
+      setFeedback(`Integration test failed: ${result?.message || "Unknown error"}`, "error");
+    }
+  };
+
+  const handleImportCsvPreview = async () => {
+    const result = await importCsv({
+      text: csvImportText.trim() || undefined,
+      filePath: csvImportPath.trim() || undefined
+    });
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
+    const outputKey = selectedNode?.id ? `${selectedNode.id}_rows` : "csvRows";
+    const nodeId = handleAddNode("data_import_csv", {
+      label: "CSV Import",
+      text: csvImportText.trim() || undefined,
+      filePath: csvImportPath.trim() || undefined,
+      outputKey
+    });
+    setFeedback(`CSV parsed (${rows.length} rows). Added node ${nodeId}.`, "success");
+  };
+
+  const handleBeginTwoFactorSetup = async () => {
+    const setup = await beginTwoFactorSetup();
+    setTwoFactorSetup(setup as TwoFactorSetupPayload);
+    setTwoFactorStatus((prev) => ({ enabled: prev?.enabled || false, pending: true }));
+    setFeedback("2FA setup created. Scan QR and verify token.", "info");
+  };
+
+  const handleVerifyTwoFactorSetup = async () => {
+    const token = twoFactorToken.trim();
+    if (!token) {
+      setFeedback("Enter a 2FA token to verify setup", "error");
+      return;
+    }
+    await verifyTwoFactorSetup(token);
+    const status = await getTwoFactorStatus();
+    setTwoFactorStatus(status as TwoFactorStatus);
+    setTwoFactorSetup(null);
+    setTwoFactorToken("");
+    setFeedback("2FA enabled", "success");
+  };
+
+  const handleDisableTwoFactor = async () => {
+    const token = twoFactorToken.trim();
+    if (!token) {
+      setFeedback("Enter current 2FA token to disable", "error");
+      return;
+    }
+    await disableTwoFactor(token);
+    const status = await getTwoFactorStatus();
+    setTwoFactorStatus(status as TwoFactorStatus);
+    setTwoFactorSetup(null);
+    setTwoFactorToken("");
+    setFeedback("2FA disabled", "success");
+  };
+
   const handleCreateUser = async () => {
     if (!newUserName.trim() || !newUserPassword) {
       setFeedback("Username and password are required", "error");
@@ -1300,6 +1627,31 @@ export default function App() {
     setFeedback("Workflow renamed", "success");
   };
 
+  const handleAddWorkflowComment = async () => {
+    if (!activeWorkflow) return;
+    const message = commentDraft.trim();
+    if (!message) {
+      setFeedback("Comment message is required", "error");
+      return;
+    }
+    const created = await createWorkflowComment(activeWorkflow.id, {
+      message,
+      nodeId: selectedNode?.id
+    });
+    setCommentDraft("");
+    setWorkflowComments((prev) => [...prev, created]);
+    setFeedback("Comment added", "success");
+    await refreshWorkflowCollaboration(activeWorkflow.id);
+  };
+
+  const handleDeleteWorkflowComment = async (commentId: string) => {
+    if (!activeWorkflow) return;
+    await deleteWorkflowComment(activeWorkflow.id, commentId);
+    setWorkflowComments((prev) => prev.filter((comment) => comment.id !== commentId));
+    setFeedback("Comment deleted", "success");
+    await refreshWorkflowCollaboration(activeWorkflow.id);
+  };
+
   const handleDeleteWorkflow = async () => {
     if (!activeWorkflow) return;
     const ok = window.confirm(`Delete workflow "${activeWorkflow.name}" and all of its runs?`);
@@ -1313,6 +1665,10 @@ export default function App() {
     setRunDiff(null);
     setVersions([]);
     setRollbackVersion("");
+    setCollabPresence([]);
+    setWorkflowComments([]);
+    setWorkflowHistory(null);
+    setCommentDraft("");
     await refreshWorkflows(true);
     setFeedback("Workflow deleted", "success");
     await refreshDashboard();
@@ -1492,6 +1848,12 @@ export default function App() {
           <div className="login-fields">
             <input placeholder="Username" id="username" />
             <input placeholder="Password" id="password" type="password" />
+            <input
+              placeholder="2FA code (if enabled)"
+              id="totp"
+              value={loginTotpCode}
+              onChange={(e) => setLoginTotpCode(e.target.value)}
+            />
             <button
               disabled={isActionLoading("login")}
               className={isActionLoading("login") ? "is-loading" : ""}
@@ -1499,7 +1861,8 @@ export default function App() {
                 withActionLoading("login", async () => {
                   const username = (document.getElementById("username") as HTMLInputElement).value;
                   const password = (document.getElementById("password") as HTMLInputElement).value;
-                  await handleLogin(username, password);
+                  const totp = (document.getElementById("totp") as HTMLInputElement).value;
+                  await handleLogin(username, password, totp);
                 });
               }}
             >
@@ -1538,6 +1901,82 @@ export default function App() {
         <button className="secondary" onClick={handleLogout}>
           Logout
         </button>
+        <h3>Security</h3>
+        <small>
+          2FA:{" "}
+          {twoFactorStatus?.enabled ? "Enabled" : twoFactorStatus?.pending ? "Pending verification" : "Disabled"}
+        </small>
+        {!twoFactorStatus?.enabled ? (
+          <button onClick={() => handleBeginTwoFactorSetup().catch(showError)}>Start 2FA Setup</button>
+        ) : null}
+        {twoFactorSetup?.qrCodeUrl ? (
+          <img className="twofactor-qr" src={twoFactorSetup.qrCodeUrl} alt="2FA QR" />
+        ) : null}
+        {twoFactorSetup?.secret ? <small>Secret: {twoFactorSetup.secret}</small> : null}
+        <input
+          value={twoFactorToken}
+          onChange={(e) => setTwoFactorToken(e.target.value)}
+          placeholder="2FA token"
+        />
+        {twoFactorSetup ? (
+          <button onClick={() => handleVerifyTwoFactorSetup().catch(showError)}>Verify 2FA Setup</button>
+        ) : null}
+        {twoFactorStatus?.enabled ? (
+          <button className="danger" onClick={() => handleDisableTwoFactor().catch(showError)}>
+            Disable 2FA
+          </button>
+        ) : null}
+        <h3>Collaboration</h3>
+        <small>Live presence</small>
+        <div className="collab-presence">
+          {collabPresence.length ? (
+            collabPresence.slice(0, 10).map((entry) => (
+              <div key={entry.clientId} className="collab-item">
+                <strong>{entry.username}</strong>
+                <small>
+                  {entry.status}
+                  {entry.currentNodeId ? ` · ${entry.currentNodeId}` : ""}
+                </small>
+              </div>
+            ))
+          ) : (
+            <small>No active viewers</small>
+          )}
+        </div>
+        <small>Workflow comments</small>
+        <input
+          value={commentDraft}
+          onChange={(e) => setCommentDraft(e.target.value)}
+          placeholder={selectedNode ? `Comment on ${selectedNode.id}` : "Add a workflow comment"}
+        />
+        <button onClick={() => handleAddWorkflowComment().catch(showError)}>Add Comment</button>
+        <div className="collab-comments">
+          {workflowComments.slice(-8).reverse().map((comment) => (
+            <div key={comment.id} className="collab-item">
+              <strong>{comment.authorUsername}</strong>
+              <small>
+                {new Date(comment.createdAt).toLocaleString()}
+                {comment.nodeId ? ` · ${comment.nodeId}` : ""}
+              </small>
+              <small>{comment.message}</small>
+              <button onClick={() => handleDeleteWorkflowComment(comment.id).catch(showError)}>Delete</button>
+            </div>
+          ))}
+          {!workflowComments.length ? <small>No comments yet</small> : null}
+        </div>
+        <small>Change history</small>
+        <div className="collab-history">
+          {(workflowHistory?.events || []).slice(0, 8).map((event) => (
+            <div key={event.id} className="collab-item">
+              <strong>{event.action}</strong>
+              <small>
+                {new Date(event.at).toLocaleString()} · {event.actorUsername}
+              </small>
+              {event.message ? <small>{event.message}</small> : null}
+            </div>
+          ))}
+          {!workflowHistory?.events?.length ? <small>No history yet</small> : null}
+        </div>
         <h3>Templates</h3>
         <input
           value={templateSearch}
@@ -1586,6 +2025,58 @@ export default function App() {
         >
           {isActionLoading("create-template") ? "Creating..." : "Create From Template"}
         </button>
+        <h3>Integrations</h3>
+        <input
+          value={integrationName}
+          onChange={(e) => setIntegrationName(e.target.value)}
+          placeholder="Integration name"
+        />
+        <select value={integrationType} onChange={(e) => setIntegrationType(e.target.value)}>
+          <option value="http_api">HTTP API</option>
+          <option value="postgresql">PostgreSQL</option>
+          <option value="mysql">MySQL</option>
+          <option value="mongodb">MongoDB</option>
+          <option value="google_sheets">Google Sheets</option>
+          <option value="airtable">Airtable</option>
+          <option value="s3">S3</option>
+        </select>
+        <textarea
+          value={integrationConfigText}
+          onChange={(e) => setIntegrationConfigText(e.target.value)}
+          rows={4}
+          placeholder='{"baseUrl":"https://example.com"}'
+        />
+        <button onClick={() => handleCreateIntegration().catch(showError)}>Create Integration</button>
+        <div className="integration-list">
+          {integrations.slice(0, 8).map((integration) => (
+            <div key={integration.id} className="schedule-item">
+              <div>
+                <strong>{integration.name}</strong>
+                <small>{integration.type}</small>
+              </div>
+              <div className="schedule-actions">
+                <button onClick={() => handleTestIntegration(integration.id).catch(showError)}>Test</button>
+                <button className="danger" onClick={() => handleDeleteIntegration(integration.id).catch(showError)}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+          {!integrations.length ? <small>No integrations configured.</small> : null}
+        </div>
+        <small>CSV import helper</small>
+        <textarea
+          value={csvImportText}
+          onChange={(e) => setCsvImportText(e.target.value)}
+          rows={3}
+          placeholder={"name,email\nAlice,alice@example.com"}
+        />
+        <input
+          value={csvImportPath}
+          onChange={(e) => setCsvImportPath(e.target.value)}
+          placeholder="CSV file path (optional)"
+        />
+        <button onClick={() => handleImportCsvPreview().catch(showError)}>Parse CSV + Add Node</button>
         <h3>Schedules</h3>
         <div className="schedule-preset-row">
           <select value={selectedSchedulePreset} onChange={(e) => setSelectedSchedulePreset(e.target.value)}>
@@ -2139,6 +2630,27 @@ export default function App() {
                   ))}
                 </div>
               ) : null}
+              {runContextEntries.length ? (
+                <div className="debug-list">
+                  <strong>Variable Inspector</strong>
+                  {runContextEntries.map((entry) => (
+                    <small key={entry.key}>
+                      {entry.key} ({entry.type}): {entry.preview}
+                    </small>
+                  ))}
+                </div>
+              ) : null}
+              {runNetworkLogs.length ? (
+                <div className="debug-list">
+                  <strong>Network Inspector</strong>
+                  {runNetworkLogs.map((entry: any, idx: number) => (
+                    <small key={`${entry?.at || idx}-${entry?.nodeId || "net"}`}>
+                      [{entry?.kind || "net"}] {entry?.method || "-"} {entry?.url || "-"} {"->"}{" "}
+                      {entry?.status ?? "-"} ({entry?.durationMs ?? 0}ms)
+                    </small>
+                  ))}
+                </div>
+              ) : null}
               {screenshotArtifacts.length ? (
                 <div className="artifact-grid">
                   {screenshotArtifacts.slice(0, 8).map((artifact, idx) => {
@@ -2180,6 +2692,29 @@ export default function App() {
                       >
                         <small>
                           {artifact.nodeId || "node"} · attempt {artifact.attempt ?? "-"} · Open snapshot
+                        </small>
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {visualArtifacts.length ? (
+                <div className="debug-list">
+                  <strong>Visual Regression Artifacts</strong>
+                  {visualArtifacts.slice(0, 8).map((artifact, idx) => {
+                    const url = artifactPathToUrl(API_URL, artifact.path);
+                    return (
+                      <a
+                        key={`${artifact.path || "visual"}-${idx}`}
+                        href={url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => {
+                          if (!url) event.preventDefault();
+                        }}
+                      >
+                        <small>
+                          {artifact.type || "visual"} · {artifact.nodeId || "node"} · Open artifact
                         </small>
                       </a>
                     );
