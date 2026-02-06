@@ -122,7 +122,33 @@ Schedule management:
 - Card shows last run time/status/error
 - `Upcoming Calendar` groups upcoming runs by local date
 
-## 10. Secrets and LLM transforms
+## 10. Monitor performance and resources
+
+The dashboard (top of canvas) now includes:
+- Daily run trend (volume and success rate)
+- Error analysis (top failing nodes)
+- Resource usage (memory, load average, active runs, uptime)
+
+Use the window selector (`1/7/14/30 days`) and `Refresh` for updated analytics.
+
+## 11. Build advanced automation flows
+
+Use these node patterns for resilient orchestration:
+- `conditional_branch`: route by rule (`truthy`, `eq`, `gt`, etc.), then set `trueTarget`/`falseTarget`
+- `loop_iterate`: process arrays with `itemKey`/`indexKey`, optional inline tasks, and `allowPartial`
+- `parallel_execute`: run independent inline tasks concurrently, with per-task timeout and partial mode
+
+Practical recipe:
+1. Add `conditional_branch` after extraction/validation.
+2. Send high-risk path to `manual_approval`.
+3. Send low-risk path to `parallel_execute` for fast fan-out sync.
+4. For batches, insert `loop_iterate` before submit to process each item.
+
+Selector reliability tips:
+- Fill `selector`, `textHint`, `testId`, and `ariaLabel` in Playwright nodes when possible.
+- Keep `SELECTOR_AI_ENABLED=1` for automatic fallback suggestions.
+
+## 12. Secrets and LLM transforms
 
 Add secrets:
 1. Enter key/value in `Secrets` panel.
@@ -142,7 +168,7 @@ Pull model once:
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
 
-## 11. Admin features
+## 13. Admin features
 
 For admin users:
 - Manage users (create/disable/delete)
@@ -162,7 +188,7 @@ curl -sS "http://localhost:8080/api/admin/audit?limit=20" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 12. Useful commands
+## 14. Useful commands
 
 Start without auto-update:
 
@@ -200,7 +226,7 @@ Rebuild clean container node modules (fix module errors):
 docker compose up --build --renew-anon-volumes
 ```
 
-## 13. Troubleshooting
+## 15. Troubleshooting
 
 Login fails:
 - Verify `APP_USERNAME` and `APP_PASSWORD` in `.env`.

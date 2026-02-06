@@ -15,16 +15,34 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 - Built-in workflow templates and local-time scheduling
 - Schedule presets and next-run preview before saving
 - Schedule dependency chains and maintenance windows
+- Daily/hourly performance trends, failure analysis, and server resource usage dashboard
 - Local auth, role permissions, webhook events, rate limiting
 - Persistent audit logging with admin audit viewer/API
 - Local LLM data transform support via Ollama
 - Structured JSON request logs + Prometheus-compatible `/metrics` endpoint
+
+## Priority Status
+Priority 1 (`Quick Wins`) is implemented:
+- Health/readiness probes (`/health`, `/ready`) plus startup login protection
+- Graceful shutdown (`SIGINT`/`SIGTERM`) with active-run drain timeout
+- Enhanced toasts (animated, stacked, action button support)
+- Smart node positioning, auto-connect, keyboard shortcuts
+- Workflow JSON import/export in the UI
+
+Priority 2 (`Game-Changing Features`) is implemented:
+- Advanced automation nodes (`conditional_branch`, `loop_iterate`, `parallel_execute`)
+- Real-time execution visualization (node status colors + runtime + diagnostics progress)
+- AI-assisted selector fallback generation with multiple candidate strategies
+- Performance dashboard (summary, daily/hourly trends, top failures, top risk workflows, resource usage)
+- Enhanced scheduling (calendar/upcoming runs, presets, dependency chains, maintenance windows)
+- Workflow template library (web/data/desktop patterns)
 
 ## Recent Updates
 - Added persistent audit logging with retention controls (`AUDIT_FILE`, `AUDIT_MAX_EVENTS`)
 - Added schedule presets and local-time next-run preview
 - Added admin audit endpoint and sidebar audit log viewer
 - Added observability primitives: structured logs and Prometheus metrics export
+- Added startup-ready login guard to prevent transient auth/API errors during boot
 
 ## Services
 - `web` UI: `http://localhost:5173`

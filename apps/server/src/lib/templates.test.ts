@@ -6,7 +6,10 @@ test("listWorkflowTemplates exposes curated templates", () => {
   const templates = listWorkflowTemplates();
   assert.equal(templates.length >= 7, true);
   assert.equal(templates.some((template) => template.id === "web-form-submit"), true);
+  assert.equal(templates.some((template) => template.id === "web-table-scrape"), true);
   assert.equal(templates.some((template) => template.id === "conditional-routing"), true);
+  assert.equal(templates.some((template) => template.id === "api-cleanup-sync"), true);
+  assert.equal(templates.some((template) => template.id === "batch-loop-sync"), true);
   const sample = templates.find((template) => template.id === "api-cleanup-sync");
   assert.equal(typeof sample?.difficulty, "string");
   assert.equal(Array.isArray(sample?.tags), true);

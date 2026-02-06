@@ -149,6 +149,18 @@ function artifactPathToUrl(apiUrl: string, artifactPath?: string) {
   return null;
 }
 
+function formatBytes(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [workflowList, setWorkflowList] = useState<any[]>([]);
@@ -336,6 +348,40 @@ export default function App() {
     };
   }, [activeRun?.id, activeRun?.nodeStates]);
 
+  const dailyTrend = useMemo(() => {
+    const points = Array.isArray(dashboard?.daily) ? dashboard.daily : [];
+    const maxTotal = points.reduce((max: number, point: any) => Math.max(max, Number(point?.total || 0)), 0);
+    return points.slice(-10).map((point: any) => {
+      const total = Number(point?.total || 0);
+      const succeeded = Number(point?.succeeded || 0);
+      const failed = Number(point?.failed || 0);
+      const successPct = total ? Math.round((succeeded / total) * 100) : 0;
+      const barPct = maxTotal ? Math.max(6, Math.round((total / maxTotal) * 100)) : 6;
+      return {
+        date: String(point?.date || "-"),
+        total,
+        succeeded,
+        failed,
+        successPct,
+        barPct
+      };
+    });
+  }, [dashboard?.daily]);
+
+  const hourlyTrend = useMemo(() => {
+    const points = Array.isArray(dashboard?.hourly) ? dashboard.hourly : [];
+    const maxTotal = points.reduce((max: number, point: any) => Math.max(max, Number(point?.total || 0)), 0);
+    return points.map((point: any) => {
+      const total = Number(point?.total || 0);
+      const barPct = maxTotal ? Math.max(6, Math.round((total / maxTotal) * 100)) : 6;
+      return {
+        hour: String(point?.hour || "--"),
+        total,
+        barPct
+      };
+    });
+  }, [dashboard?.hourly]);
+
   const upcomingScheduleGroups = useMemo(() => {
     const groups = new Map<string, UpcomingScheduleItem[]>();
     for (const item of upcomingSchedules) {
@@ -433,11 +479,13 @@ export default function App() {
         if (state && typeof state === "object") {
           nextData.__runStatus = String(state.status || "");
           nextData.__runDurationMs = typeof state.durationMs === "number" ? state.durationMs : undefined;
+          nextData.__runStartedAt = state.startedAt ? String(state.startedAt) : "";
           nextData.__runAttempts = typeof state.attempts === "number" ? state.attempts : undefined;
           nextData.__runError = state.error ? String(state.error) : "";
         } else {
           delete nextData.__runStatus;
           delete nextData.__runDurationMs;
+          delete nextData.__runStartedAt;
           delete nextData.__runAttempts;
           delete nextData.__runError;
         }
@@ -445,6 +493,7 @@ export default function App() {
         const unchanged =
           prevData.__runStatus === nextData.__runStatus &&
           prevData.__runDurationMs === nextData.__runDurationMs &&
+          prevData.__runStartedAt === nextData.__runStartedAt &&
           prevData.__runAttempts === nextData.__runAttempts &&
           prevData.__runError === nextData.__runError;
         return unchanged ? node : { ...node, data: nextData };
@@ -1922,6 +1971,71 @@ export default function App() {
             >
               {isActionLoading("refresh-dashboard") ? "Refreshing..." : "Refresh"}
             </button>
+          </div>
+        </div>
+
+        <div className="analytics-strip">
+          <div className="analytics-card">
+            <strong>Daily Workflow Trend</strong>
+            <small>Runs and success rate by day (local timezone)</small>
+            <div className="trend-list">
+              {dailyTrend.length ? (
+                dailyTrend.map((row) => (
+                  <div key={row.date} className="trend-row">
+                    <span>{row.date}</span>
+                    <div className="trend-bar">
+                      <div className="trend-fill" style={{ width: `${row.barPct}%` }} />
+                    </div>
+                    <small>
+                      {row.total} runs · {row.successPct}% ok · {row.failed} fail
+                    </small>
+                  </div>
+                ))
+              ) : (
+                <small>No trend data yet.</small>
+              )}
+            </div>
+          </div>
+          <div className="analytics-card">
+            <strong>Error Analysis</strong>
+            <small>Most frequent failed nodes in selected window</small>
+            <div className="trend-list">
+              {dashboard?.topFailures?.length ? (
+                dashboard.topFailures.slice(0, 8).map((item: any) => (
+                  <div key={item.nodeId} className="trend-row">
+                    <span>{item.nodeId}</span>
+                    <div className="trend-bar">
+                      <div className="trend-fill error" style={{ width: `${Math.min(100, item.count * 12)}%` }} />
+                    </div>
+                    <small>{item.count} failures</small>
+                  </div>
+                ))
+              ) : (
+                <small>No failures in selected window.</small>
+              )}
+            </div>
+          </div>
+          <div className="analytics-card">
+            <strong>Resource Usage</strong>
+            <small>Live server process and scheduler snapshot</small>
+            <div className="resource-grid">
+              <small>RSS Memory: {formatBytes(dashboard?.resources?.rssBytes)}</small>
+              <small>Heap Used: {formatBytes(dashboard?.resources?.heapUsedBytes)}</small>
+              <small>Heap Total: {formatBytes(dashboard?.resources?.heapTotalBytes)}</small>
+              <small>External: {formatBytes(dashboard?.resources?.externalBytes)}</small>
+              <small>Load (1m): {dashboard?.resources?.loadAverage1m ?? "-"}</small>
+              <small>Load (5m): {dashboard?.resources?.loadAverage5m ?? "-"}</small>
+              <small>Load (15m): {dashboard?.resources?.loadAverage15m ?? "-"}</small>
+              <small>Active Runs: {dashboard?.resources?.activeRuns ?? 0}</small>
+              <small>Uptime: {dashboard?.resources?.uptimeSec ?? 0}s</small>
+            </div>
+            <div className="hourly-spark">
+              {hourlyTrend.slice(0, 24).map((row) => (
+                <div key={row.hour} className="hourly-bar" title={`${row.hour}:00 -> ${row.total} runs`}>
+                  <div style={{ height: `${row.barPct}%` }} />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

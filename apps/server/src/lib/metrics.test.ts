@@ -45,4 +45,6 @@ test("buildDashboardMetrics computes summary, daily and top failures", () => {
   assert.equal(metrics.topWorkflows[0].workflowName, "Alpha");
   assert.equal(metrics.topWorkflows[0].failed, 1);
   assert.equal(metrics.daily.length >= 1, true);
+  assert.equal(metrics.hourly.length >= 1, true);
+  assert.equal(metrics.daily[0].date <= metrics.daily[metrics.daily.length - 1].date, true);
 });

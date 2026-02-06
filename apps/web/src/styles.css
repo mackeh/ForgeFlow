@@ -361,6 +361,105 @@ button.is-loading {
   font-size: 11px;
 }
 
+.analytics-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(10, 16, 22, 0.9);
+}
+
+.analytics-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analytics-card > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 130px;
+  overflow: auto;
+}
+
+.trend-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 90px) 1fr minmax(100px, 128px);
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.trend-row span {
+  color: var(--muted);
+}
+
+.trend-row small {
+  color: var(--text);
+  opacity: 0.88;
+}
+
+.trend-bar {
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.trend-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-2), #89e7df);
+}
+
+.trend-fill.error {
+  background: linear-gradient(90deg, #f58b1f, #d64e3a);
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 6px;
+}
+
+.resource-grid small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.hourly-spark {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  height: 42px;
+  align-items: end;
+}
+
+.hourly-bar {
+  height: 100%;
+  display: flex;
+  align-items: end;
+}
+
+.hourly-bar > div {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  min-height: 3px;
+  background: linear-gradient(180deg, #77d5cf, #2cb9b0);
+}
+
 .status-bar {
   position: absolute;
   bottom: 0;
@@ -916,6 +1015,14 @@ button.is-loading {
   }
 
   .metrics-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

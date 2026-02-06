@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { createServer } from "http";
+import os from "os";
 import { WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
@@ -196,6 +197,20 @@ app.use((req, res, next) => {
 });
 
 app.post("/api/auth/login", loginLimiter, async (req, res) => {
+  if (!schedulerReady) {
+    const health = await collectHealth(prisma);
+    const ready = health.criticalOk && schedulerReady && !shuttingDown;
+    if (!ready) {
+      res.status(503).json({
+        error: "Server is starting up. Please retry in a few seconds.",
+        ready: false,
+        schedulerReady,
+        criticalOk: health.criticalOk
+      });
+      return;
+    }
+  }
+
   const schema = z.object({ username: z.string(), password: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -936,6 +951,8 @@ app.get("/api/metrics/dashboard", canReadMetrics, async (req, res) => {
   const schedules = await listSchedules();
   const activeSchedules = schedules.filter((schedule) => schedule.enabled).length;
   const metrics = buildDashboardMetrics(runs as any, timezone, days);
+  const memory = process.memoryUsage();
+  const loadAvg = os.loadavg();
 
   res.json({
     ...metrics,
@@ -943,6 +960,17 @@ app.get("/api/metrics/dashboard", canReadMetrics, async (req, res) => {
       total: schedules.length,
       active: activeSchedules,
       disabled: schedules.length - activeSchedules
+    },
+    resources: {
+      activeRuns: getActiveRunCount(),
+      uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+      rssBytes: memory.rss,
+      heapUsedBytes: memory.heapUsed,
+      heapTotalBytes: memory.heapTotal,
+      externalBytes: memory.external,
+      loadAverage1m: Number(loadAvg[0].toFixed(2)),
+      loadAverage5m: Number(loadAvg[1].toFixed(2)),
+      loadAverage15m: Number(loadAvg[2].toFixed(2))
     }
   });
 });
