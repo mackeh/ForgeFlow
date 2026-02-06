@@ -139,3 +139,7 @@ Ollama model missing:
 ```bash
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
+
+## Support
+If ForgeFlow helps you, you can support development here:
+- https://buymeacoffee.com/mackeh
