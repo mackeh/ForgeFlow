@@ -16,13 +16,24 @@ type RecorderSession = {
   events: Array<Record<string, unknown>>;
 };
 
+type RecorderDeps = {
+  launchBrowser?: (options: { headless: boolean; args: string[] }) => Promise<Browser>;
+  makeId?: () => string;
+};
+
 const sessions = new Map<string, RecorderSession>();
 const sessionsByPage = new Map<Page, RecorderSession>();
 
-export async function startWebRecorder({ startUrl }: { startUrl?: string }): Promise<RecorderSessionInfo> {
+export async function startWebRecorder(
+  { startUrl }: { startUrl?: string },
+  deps: RecorderDeps = {}
+): Promise<RecorderSessionInfo> {
   const headlessRaw = String(process.env.PLAYWRIGHT_HEADLESS ?? "false").toLowerCase().trim();
   const headless = !(headlessRaw === "0" || headlessRaw === "false" || headlessRaw === "no");
-  const browser = await chromium.launch({
+  const launchBrowser = deps.launchBrowser ?? chromium.launch;
+  const makeId = deps.makeId ?? randomUUID;
+
+  const browser = await launchBrowser({
     headless,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
   });
@@ -102,7 +113,7 @@ export async function startWebRecorder({ startUrl }: { startUrl?: string }): Pro
     await page.goto(startUrl);
   }
 
-  const id = randomUUID();
+  const id = makeId();
   const session: RecorderSession = {
     id,
     browser,

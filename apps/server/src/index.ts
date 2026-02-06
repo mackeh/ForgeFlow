@@ -17,6 +17,7 @@ import {
 } from "./lib/workflows.js";
 import { listSecrets, upsertSecret } from "./lib/secrets.js";
 import { preflightForDefinition, preflightForWorkflowId } from "./lib/preflight.js";
+import { diffRunNodeStates } from "./lib/runDiff.js";
 
 const app = express();
 const server = createServer(app);
@@ -314,28 +315,7 @@ app.get("/api/runs/:id/diff-last-success", async (req, res) => {
     res.json({ hasBaseline: false, changes: [] });
     return;
   }
-
-  const currentStates = ((run.nodeStates || {}) as any) || {};
-  const prevStates = ((prev.nodeStates || {}) as any) || {};
-
-  const allNodeIds = Array.from(new Set([...Object.keys(currentStates), ...Object.keys(prevStates)]));
-  const changes = allNodeIds
-    .map((nodeId) => {
-      const curr = currentStates[nodeId] || {};
-      const old = prevStates[nodeId] || {};
-      return {
-        nodeId,
-        statusBefore: old.status,
-        statusNow: curr.status,
-        durationBefore: old.durationMs,
-        durationNow: curr.durationMs,
-        changed:
-          old.status !== curr.status || Number(old.durationMs || 0) !== Number(curr.durationMs || 0)
-      };
-    })
-    .filter((row) => row.changed);
-
-  res.json({ hasBaseline: true, baselineRunId: prev.id, changes });
+  res.json(diffRunNodeStates(run as any, prev as any));
 });
 
 app.get("/api/secrets", async (_req, res) => {

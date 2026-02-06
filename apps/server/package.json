@@ -7,6 +7,7 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test src/**/*.test.ts",
+    "test:critical": "node --import tsx --test src/lib/execution-flows.test.ts src/lib/runDiff.test.ts src/lib/recorder.test.ts src/lib/agent.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
