@@ -1,9 +1,9 @@
-# RPA Local node-graph Build
+# ForgeFlow RPA Reliability Build
 
 Single-user local RPA with node-graph orchestration, resilient execution, web + desktop automation, recorder support, local LLM cleanup, run diagnostics, and workflow version lifecycle. Runs entirely on your machine with Docker.
 
 ## Services
-- **web**: React node-graph UI (n8n-style) with runs timeline and diff
+- **web**: React graph-node UI with runs timeline and diff
 - **server**: API + workflow runner + web recorder
 - **agent**: Desktop automation agent (record + run)
 - **db**: Postgres
@@ -18,6 +18,15 @@ Single-user local RPA with node-graph orchestration, resilient execution, web + 
 3. Open UI
    - `http://localhost:5173`
 
+Detailed usage guide:
+- `QUICKSTART.md`
+
+### Auto-update on start
+- `./start.sh` now auto-updates dependencies and images by default:
+- Pulls latest image tags.
+- Rebuilds `server`, `web`, and `agent` with fresh base layers and dependency installs.
+- Disable with:
+- `AUTO_UPDATE=0 ./start.sh`
 ## First-time DB setup
 - `docker compose run --rm server npm run prisma:migrate`
 
