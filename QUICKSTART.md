@@ -68,6 +68,7 @@ Tips:
 If a run fails:
 - Use `Resume From Failed Run` to continue from checkpoint when available.
 - Use `Diff vs Last Success` to inspect behavior changes.
+- Open `Run Diagnostics` to inspect failed nodes, latest errors, screenshot previews, and DOM snapshots.
 
 If a run pauses at `manual_approval`:
 - Click `Approve Waiting Node` in run controls.
@@ -177,6 +178,12 @@ Show logs:
 docker compose logs -f
 ```
 
+Check Prometheus metrics output:
+
+```bash
+curl -sS http://localhost:8080/metrics | head -n 40
+```
+
 Stop all services:
 
 ```bash
@@ -209,3 +216,6 @@ Workflow appears stuck:
 ```bash
 docker compose logs -f server agent
 ```
+
+Need less verbose request logs:
+- Set `REQUEST_LOGS=0` in `.env` and restart.

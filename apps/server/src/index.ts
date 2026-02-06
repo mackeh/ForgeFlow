@@ -53,6 +53,12 @@ import {
 import { dispatchWebhookTest } from "./lib/webhooks.js";
 import { collectHealth } from "./lib/health.js";
 import { appendAuditEvent, listAuditEvents } from "./lib/auditStore.js";
+import {
+  ObservabilityRegistry,
+  createStructuredLogger,
+  normalizeRequestPath,
+  statusClass
+} from "./lib/observability.js";
 
 const app = express();
 const server = createServer(app);
@@ -62,6 +68,11 @@ const scheduler = new WorkflowScheduler(prisma);
 const rateLimitConfig = loadRateLimitConfig();
 const startedAt = Date.now();
 const shutdownTimeoutMs = Number(process.env.SHUTDOWN_TIMEOUT_MS || 30_000);
+const requestLogsEnabled = process.env.REQUEST_LOGS !== "0";
+const configuredLogLevel = String(process.env.LOG_LEVEL || "info").toLowerCase();
+const logLevel = configuredLogLevel === "warn" || configuredLogLevel === "error" ? configuredLogLevel : "info";
+const logger = createStructuredLogger("forgeflow-server", logLevel);
+const observability = new ObservabilityRegistry();
 let schedulerReady = false;
 let shuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
@@ -96,6 +107,57 @@ attachRecorderWs(wss);
 app.use("/recordings", express.static("/recordings"));
 app.use("/artifacts", express.static("/app/artifacts"));
 
+app.use((req, res, next) => {
+  const startedNs = process.hrtime.bigint();
+  const requestPath = normalizeRequestPath(req.path || req.originalUrl.split("?")[0] || "/");
+  observability.incrementGauge("forgeflow_http_in_flight_requests", 1);
+
+  res.on("finish", () => {
+    observability.incrementGauge("forgeflow_http_in_flight_requests", -1);
+    const durationSec = Number(process.hrtime.bigint() - startedNs) / 1_000_000_000;
+    const labels = {
+      method: req.method,
+      path: requestPath,
+      status: statusClass(res.statusCode)
+    };
+    observability.incrementCounter("forgeflow_http_requests_total", labels);
+    if (res.statusCode >= 400) {
+      observability.incrementCounter("forgeflow_http_request_errors_total", labels);
+    }
+    observability.observeHistogram("forgeflow_http_request_duration_seconds", durationSec, {
+      method: req.method,
+      path: requestPath
+    });
+
+    if (requestLogsEnabled && requestPath !== "/metrics") {
+      logger.info("http.request", {
+        method: req.method,
+        path: requestPath,
+        statusCode: res.statusCode,
+        durationMs: Math.round(durationSec * 1000),
+        ip: req.ip
+      });
+    }
+  });
+
+  next();
+});
+
+app.get("/metrics", (_req, res) => {
+  const memory = process.memoryUsage();
+  const output = observability.renderPrometheus([
+    { name: "forgeflow_active_runs", value: getActiveRunCount() },
+    { name: "forgeflow_scheduler_ready", value: schedulerReady ? 1 : 0 },
+    { name: "forgeflow_shutting_down", value: shuttingDown ? 1 : 0 },
+    { name: "forgeflow_uptime_seconds", value: Math.floor((Date.now() - startedAt) / 1000) },
+    { name: "forgeflow_process_resident_memory_bytes", value: memory.rss },
+    { name: "forgeflow_process_heap_used_bytes", value: memory.heapUsed },
+    { name: "forgeflow_process_heap_total_bytes", value: memory.heapTotal }
+  ]);
+  res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+  res.status(200).send(output);
+});
+
 app.get("/health", async (_req, res) => {
   const health = await collectHealth(prisma);
   const status = health.criticalOk ? 200 : 503;
@@ -126,7 +188,7 @@ app.use((req, res, next) => {
     next();
     return;
   }
-  if (req.path === "/health" || req.path === "/ready") {
+  if (req.path === "/health" || req.path === "/ready" || req.path === "/metrics") {
     next();
     return;
   }
@@ -224,7 +286,7 @@ async function writeAuditEvent(
       ...payload
     });
   } catch (error) {
-    console.error("[audit] failed to write audit event", error);
+    logger.error("audit.write_failed", { error });
   }
 }
 
@@ -656,9 +718,13 @@ app.post("/api/runs/start", canExecuteWorkflows, async (req, res) => {
     });
 
     startRun(prisma, run.id).catch((err) => {
-      console.error("Run failed", err);
+      logger.error("run.start_async_failed", { runId: run.id, error: err });
     });
 
+    observability.incrementCounter("forgeflow_runs_started_total", {
+      mode: testMode ? "test" : "prod",
+      source: parsed.data.resumeFromRunId ? "resume" : "manual"
+    });
     await writeAuditEvent(req, {
       action: "run.start",
       resourceType: "run",
@@ -759,9 +825,12 @@ app.post("/api/runs/:id/approve", canApproveWorkflows, async (req, res) => {
   });
 
   if (parsed.data.approved) {
-    startRun(prisma, run.id).catch((err) => console.error("Resume failed", err));
+    startRun(prisma, run.id).catch((err) => logger.error("run.resume_async_failed", { runId: run.id, error: err }));
   }
 
+  observability.incrementCounter("forgeflow_run_approvals_total", {
+    approved: parsed.data.approved ? "true" : "false"
+  });
   await writeAuditEvent(req, {
     action: "run.approval",
     resourceType: "run",
@@ -1131,7 +1200,7 @@ app.post("/api/secrets", canWriteSecrets, async (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    console.error(`[SECRETS] Error upserting secret:`, err);
+    logger.error("secret.upsert_failed", { key: parsed.data.key, error: err });
     await writeAuditEvent(req, {
       action: "secret.upsert",
       resourceType: "secret",
@@ -1175,14 +1244,14 @@ app.post("/api/recorders/desktop/stop", canWriteWorkflows, async (_req, res) => 
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8080;
 server.listen(port, () => {
-  console.log(`Server listening on ${port}`);
+  logger.info("server.listening", { port });
   scheduler
     .start()
     .then(() => {
       schedulerReady = true;
-      console.log("Scheduler started");
+      logger.info("scheduler.started");
     })
-    .catch((error) => console.error("Failed to start scheduler", error));
+    .catch((error) => logger.error("scheduler.start_failed", { error }));
 });
 
 process.on("SIGINT", () => {
@@ -1191,19 +1260,25 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM");
 });
+process.on("uncaughtException", (error) => {
+  logger.error("process.uncaught_exception", { error });
+});
+process.on("unhandledRejection", (reason) => {
+  logger.error("process.unhandled_rejection", { error: reason });
+});
 
 async function gracefulShutdown(signal: string) {
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
   let exitCode = 0;
   shutdownPromise = (async () => {
-    console.log(`[shutdown] Received ${signal}. Draining up to ${shutdownTimeoutMs}ms...`);
+    logger.info("shutdown.received", { signal, timeoutMs: shutdownTimeoutMs });
     scheduler.stop();
 
     const drained = await waitForActiveRuns(shutdownTimeoutMs);
     if (!drained.drained) {
       exitCode = 1;
-      console.warn(`[shutdown] Timed out waiting for runs. Remaining: ${drained.remaining}`);
+      logger.warn("shutdown.active_runs_timeout", { remaining: drained.remaining });
     }
 
     await Promise.all([
@@ -1215,11 +1290,11 @@ async function gracefulShutdown(signal: string) {
       })
     ]);
     await prisma.$disconnect();
-    console.log("[shutdown] Complete");
+    logger.info("shutdown.complete");
   })()
     .catch((error) => {
       exitCode = 1;
-      console.error("[shutdown] Failed", error);
+      logger.error("shutdown.failed", { error });
     })
     .finally(() => {
       process.exit(exitCode);

@@ -99,6 +99,14 @@ type AuditEvent = {
   success: boolean;
   message?: string;
 };
+type RunArtifact = {
+  nodeId?: string;
+  type?: string;
+  path?: string;
+  attempt?: number;
+  createdAt?: string;
+  error?: string;
+};
 
 const defaultDefinition = {
   nodes: [
@@ -116,6 +124,20 @@ const defaultDefinition = {
     defaultNodeTimeoutMs: 30000
   }
 };
+
+function artifactPathToUrl(apiUrl: string, artifactPath?: string) {
+  if (!artifactPath) return null;
+  const normalized = artifactPath.replace(/\\/g, "/");
+  if (normalized.includes("/app/artifacts/")) {
+    const rel = normalized.split("/app/artifacts/")[1];
+    return `${apiUrl}/artifacts/${encodeURI(rel)}`;
+  }
+  if (normalized.includes("/artifacts/")) {
+    const rel = normalized.split("/artifacts/")[1];
+    return `${apiUrl}/artifacts/${encodeURI(rel)}`;
+  }
+  return null;
+}
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
@@ -233,6 +255,47 @@ export default function App() {
     () => schedulePresets.find((preset) => preset.id === selectedSchedulePreset) || null,
     [schedulePresets, selectedSchedulePreset]
   );
+
+  const runArtifacts = useMemo(
+    () => (Array.isArray(activeRun?.artifacts) ? (activeRun.artifacts as RunArtifact[]) : []),
+    [activeRun?.id, activeRun?.artifacts]
+  );
+
+  const screenshotArtifacts = useMemo(
+    () => runArtifacts.filter((artifact) => String(artifact.type || "") === "screenshot"),
+    [runArtifacts]
+  );
+
+  const domArtifacts = useMemo(
+    () => runArtifacts.filter((artifact) => String(artifact.type || "") === "dom_snapshot"),
+    [runArtifacts]
+  );
+
+  const failedNodes = useMemo(() => {
+    if (!activeRun?.nodeStates || typeof activeRun.nodeStates !== "object" || Array.isArray(activeRun.nodeStates)) {
+      return [] as Array<{ nodeId: string; error?: string; attempts?: number; durationMs?: number }>;
+    }
+    return Object.entries(activeRun.nodeStates as Record<string, any>)
+      .filter(([, state]) => state && typeof state === "object" && String(state.status || "") === "failed")
+      .map(([nodeId, state]) => ({
+        nodeId,
+        error: state.error ? String(state.error) : "",
+        attempts: typeof state.attempts === "number" ? state.attempts : undefined,
+        durationMs: typeof state.durationMs === "number" ? state.durationMs : undefined
+      }))
+      .slice(0, 8);
+  }, [activeRun?.id, activeRun?.nodeStates]);
+
+  const runErrorLogs = useMemo(() => {
+    const logs = Array.isArray(activeRun?.logs) ? activeRun.logs : [];
+    return [...logs]
+      .reverse()
+      .filter((entry: any) => {
+        const status = String(entry?.status || "");
+        return status === "failed" || status === "retry_error" || status === "waiting_approval";
+      })
+      .slice(0, 8);
+  }, [activeRun?.id, activeRun?.logs]);
 
   useEffect(() => {
     if (!token) return;
@@ -951,6 +1014,23 @@ export default function App() {
       await refreshWorkflowMeta(activeWorkflow.id);
     }
     await refreshDashboard();
+  };
+
+  const handleCopyRunContext = async () => {
+    if (!activeRun?.context) {
+      setFeedback("No run context available", "error");
+      return;
+    }
+    const text = JSON.stringify(activeRun.context, null, 2);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API not available");
+      }
+      await navigator.clipboard.writeText(text);
+      setFeedback("Run context copied", "success");
+    } catch {
+      setFeedback("Unable to copy run context", "error");
+    }
   };
 
   const handleSaveSecret = async () => {
@@ -1701,9 +1781,87 @@ export default function App() {
                 </small>
               </div>
             ))}
-            {activeRun?.artifacts?.length ? (
-              <small>{activeRun.artifacts.length} failure artifacts captured in /artifacts</small>
-            ) : null}
+            <div className="run-debug-panel">
+              <strong>Run Diagnostics</strong>
+              {activeRun ? (
+                <small>
+                  Status: {activeRun.status} · Started:{" "}
+                  {activeRun.startedAt ? new Date(activeRun.startedAt).toLocaleString() : "n/a"} · Finished:{" "}
+                  {activeRun.finishedAt ? new Date(activeRun.finishedAt).toLocaleString() : "n/a"}
+                </small>
+              ) : (
+                <small>Select a run to inspect diagnostics.</small>
+              )}
+              {activeRun ? <button onClick={() => handleCopyRunContext().catch(showError)}>Copy Context JSON</button> : null}
+              {failedNodes.length ? (
+                <div className="debug-list">
+                  <strong>Failed Nodes</strong>
+                  {failedNodes.map((node) => (
+                    <small key={node.nodeId}>
+                      {node.nodeId}: {node.error || "Failed"} (attempts: {node.attempts ?? 0}, duration:{" "}
+                      {node.durationMs ?? 0}ms)
+                    </small>
+                  ))}
+                </div>
+              ) : null}
+              {runErrorLogs.length ? (
+                <div className="debug-list">
+                  <strong>Latest Errors</strong>
+                  {runErrorLogs.map((entry: any, idx: number) => (
+                    <small key={`${entry?.ts || idx}-${entry?.nodeId || "run"}`}>
+                      [{entry?.status || "-"}] {entry?.nodeId || "run"}: {entry?.error || entry?.message || "error"}
+                    </small>
+                  ))}
+                </div>
+              ) : null}
+              {screenshotArtifacts.length ? (
+                <div className="artifact-grid">
+                  {screenshotArtifacts.slice(0, 8).map((artifact, idx) => {
+                    const url = artifactPathToUrl(API_URL, artifact.path);
+                    return (
+                      <a
+                        key={`${artifact.path || "shot"}-${idx}`}
+                        className="artifact-card"
+                        href={url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => {
+                          if (!url) event.preventDefault();
+                        }}
+                      >
+                        {url ? <img src={url} alt={`artifact-${idx}`} /> : <div className="artifact-missing">No preview</div>}
+                        <small>
+                          {artifact.nodeId || "node"} · attempt {artifact.attempt ?? "-"}
+                        </small>
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {domArtifacts.length ? (
+                <div className="debug-list">
+                  <strong>DOM Snapshots</strong>
+                  {domArtifacts.slice(0, 8).map((artifact, idx) => {
+                    const url = artifactPathToUrl(API_URL, artifact.path);
+                    return (
+                      <a
+                        key={`${artifact.path || "dom"}-${idx}`}
+                        href={url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => {
+                          if (!url) event.preventDefault();
+                        }}
+                      >
+                        <small>
+                          {artifact.nodeId || "node"} · attempt {artifact.attempt ?? "-"} · Open snapshot
+                        </small>
+                      </a>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
             {dashboard?.topFailures?.length ? (
               <div className="top-failures">
                 <strong>Top Node Failures</strong>

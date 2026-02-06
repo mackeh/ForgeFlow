@@ -10,16 +10,19 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 - Draft and publish lifecycle with version history and rollback
 - Robust execution engine with retries, timeouts, checkpoints, resume-from-failure
 - Manual approval nodes, run logs, run diff vs last success
+- Run diagnostics panel with failed-node summaries and screenshot/DOM artifact previews
 - Built-in workflow templates and local-time scheduling
 - Schedule presets and next-run preview before saving
 - Local auth, role permissions, webhook events, rate limiting
 - Persistent audit logging with admin audit viewer/API
 - Local LLM data transform support via Ollama
+- Structured JSON request logs + Prometheus-compatible `/metrics` endpoint
 
 ## Recent Updates
 - Added persistent audit logging with retention controls (`AUDIT_FILE`, `AUDIT_MAX_EVENTS`)
 - Added schedule presets and local-time next-run preview
 - Added admin audit endpoint and sidebar audit log viewer
+- Added observability primitives: structured logs and Prometheus metrics export
 
 ## Services
 - `web` UI: `http://localhost:5173`
@@ -56,6 +59,7 @@ Primary variables in `.env`:
 - `PLAYWRIGHT_HEADLESS`, `DISPLAY`
 - `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `RATE_LIMIT_LOGIN_MAX`
 - `TRUST_PROXY`
+- `LOG_LEVEL`, `REQUEST_LOGS`
 - `SELECTOR_AI_ENABLED`, `SELECTOR_AI_MODEL`
 - `AUTHZ_FILE`, `WEBHOOKS_FILE`, `SCHEDULES_FILE`, `SCHEDULE_DEFAULT_TIMEZONE`
 - `AUDIT_FILE`, `AUDIT_MAX_EVENTS`
@@ -97,6 +101,7 @@ docker compose logs -f
 - Templates: `/api/templates`, `/api/workflows/from-template`
 - Schedules: `/api/schedules`, `/api/schedules/presets`, `/api/schedules/preview?cron=<expr>&timezone=<tz>`
 - Metrics: `/api/metrics/dashboard`
+- Runtime metrics: `/metrics` (Prometheus text format)
 - Secrets: `/api/secrets*`
 - Recorders: `/api/recorders/web/start`, `/api/recorders/desktop/start`, `/api/recorders/desktop/stop`
 - Admin/RBAC: `/api/admin/users*`, `/api/admin/roles*`

@@ -521,6 +521,78 @@ button.is-loading {
   gap: 6px;
 }
 
+.run-debug-panel {
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-debug-panel button {
+  width: fit-content;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.debug-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.debug-list a {
+  color: #9fd9ff;
+  text-decoration: none;
+}
+
+.debug-list a:hover {
+  text-decoration: underline;
+}
+
+.artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.artifact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.artifact-card img,
+.artifact-missing {
+  width: 100%;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.artifact-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.artifact-card small {
+  color: var(--muted);
+}
+
 .top-failures {
   display: flex;
   flex-direction: column;
