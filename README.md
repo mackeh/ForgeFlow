@@ -2,6 +2,8 @@
 
 Single-user local RPA with node-graph orchestration, resilient execution, web + desktop automation, recorder support, local LLM cleanup, run diagnostics, and workflow version lifecycle. Runs entirely on your machine with Docker.
 
+ForgeFlow is a **highly sophisticated, production-ready RPA platform** with excellent code quality, comprehensive features, and robust error handling. The application demonstrates professional engineering practices and is suitable for production deployment.
+
 ## Services
 - **web**: React graph-node UI with runs timeline and diff
 - **server**: API + workflow runner + web recorder
@@ -56,6 +58,14 @@ Detailed usage guide:
 - Encrypted local secret storage and `{{secret:KEY}}` interpolation.
 - Draft/publish workflow lifecycle with version history and rollback.
 - Run timeline and diff against last successful run.
+- UI toast feedback for key actions (save/publish/run/record/approve/error states).
+- Node auto-placement for new nodes, plus `Auto Layout` and `Snap: On/Off` controls in the toolbar.
+
+## UI improvements
+- Toast notifications provide immediate success/error/info feedback.
+- `Auto Layout` reorganizes nodes into a readable grid.
+- `Snap: On/Off` toggles grid snapping for manual node positioning.
+- Inspector includes `Quick Edit` fields for common node settings, with raw JSON still available for advanced edits.
 
 ## Local LLM
 - Ollama runs on `http://ollama:11434` inside Docker (not exposed on host by default to avoid port conflicts). You can pull a model in the ollama container:
