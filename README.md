@@ -45,7 +45,7 @@ Single-user local RPA with node-graph orchestration, resilient execution, web + 
 - Run timeline and diff against last successful run.
 
 ## Local LLM
-- Ollama runs on `http://ollama:11434` inside Docker. You can pull a model in the ollama container:
+- Ollama runs on `http://ollama:11434` inside Docker (not exposed on host by default to avoid port conflicts). You can pull a model in the ollama container:
   - `docker exec -it rpa-ollama ollama pull llama3.2`
 
 ## API

@@ -11,7 +11,8 @@ if [ ! -f ".env" ]; then
 fi
 
 echo "Running database migration..."
-docker compose run --rm server npm run prisma:migrate
+docker compose up -d db redis
+docker compose run --rm --no-deps server npm run prisma:migrate
 
 echo "Starting ForgeFlow..."
 docker compose up --build
