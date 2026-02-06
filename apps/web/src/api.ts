@@ -155,6 +155,16 @@ export function getSchedules(workflowId?: string) {
   return request(`/api/schedules${query}`);
 }
 
+export function getSchedulePresets() {
+  return request("/api/schedules/presets");
+}
+
+export function previewSchedule(cron: string, timezone?: string) {
+  const q = new URLSearchParams({ cron });
+  if (timezone) q.set("timezone", timezone);
+  return request(`/api/schedules/preview?${q.toString()}`);
+}
+
 export function createSchedule(payload: {
   workflowId: string;
   name?: string;

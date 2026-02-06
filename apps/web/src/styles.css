@@ -132,6 +132,16 @@ button.is-loading {
   gap: 8px;
 }
 
+.schedule-preset-row {
+  display: flex;
+  gap: 6px;
+}
+
+.schedule-preset-row select,
+.schedule-preset-row button {
+  flex: 1;
+}
+
 .schedule-item {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);

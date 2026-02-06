@@ -30,6 +30,7 @@ import {
   getRoles,
   getRun,
   getRunDiff,
+  getSchedulePresets,
   getSchedules,
   getSecrets,
   getSystemTime,
@@ -45,6 +46,7 @@ import {
   runScheduleNow,
   runPreflight,
   saveSecret,
+  previewSchedule as fetchSchedulePreview,
   startDesktopRecorder,
   startRecorder,
   startRun,
@@ -72,6 +74,18 @@ type UiLogEntry = {
   at: string;
   level: ToastLevel;
   message: string;
+};
+type SchedulePreset = {
+  id: string;
+  name: string;
+  description: string;
+  cron: string;
+};
+type SchedulePreview = {
+  nextRunAtUtc: string | null;
+  nextRunAtLocal: string | null;
+  timezone: string;
+  cron: string;
 };
 
 const defaultDefinition = {
@@ -119,6 +133,9 @@ export default function App() {
   const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
   const [scheduleTimezone, setScheduleTimezone] = useState("");
   const [scheduleTestMode, setScheduleTestMode] = useState(false);
+  const [schedulePresets, setSchedulePresets] = useState<SchedulePreset[]>([]);
+  const [selectedSchedulePreset, setSelectedSchedulePreset] = useState("");
+  const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null);
   const [dashboard, setDashboard] = useState<any | null>(null);
   const [dashboardDays, setDashboardDays] = useState(7);
   const [systemTime, setSystemTime] = useState<any | null>(null);
@@ -199,6 +216,11 @@ export default function App() {
     [templates, selectedTemplateId]
   );
 
+  const activeSchedulePreset = useMemo(
+    () => schedulePresets.find((preset) => preset.id === selectedSchedulePreset) || null,
+    [schedulePresets, selectedSchedulePreset]
+  );
+
   useEffect(() => {
     if (!token) return;
     getCurrentUser()
@@ -215,6 +237,15 @@ export default function App() {
         setTemplates(list || []);
         if (Array.isArray(list) && list.length && !selectedTemplateId) {
           setSelectedTemplateId(list[0].id);
+        }
+      })
+      .catch(showError);
+    getSchedulePresets()
+      .then((list) => {
+        const presets = Array.isArray(list) ? (list as SchedulePreset[]) : [];
+        setSchedulePresets(presets);
+        if (!selectedSchedulePreset && presets.length) {
+          setSelectedSchedulePreset(presets[0].id);
         }
       })
       .catch(showError);
@@ -293,6 +324,37 @@ export default function App() {
     if (!token) return;
     refreshDashboard(dashboardDays).catch(showError);
   }, [dashboardDays, systemTime?.timezone, token]);
+
+  useEffect(() => {
+    if (!token) {
+      setSchedulePreview(null);
+      return;
+    }
+    const cron = scheduleCron.trim();
+    if (!cron) {
+      setSchedulePreview(null);
+      return;
+    }
+    const timezone = (scheduleTimezone || systemTime?.timezone || "").trim();
+    if (!timezone) return;
+
+    const timer = window.setTimeout(() => {
+      fetchSchedulePreview(cron, timezone)
+        .then((preview) => {
+          setSchedulePreview(preview || null);
+        })
+        .catch(() => {
+          setSchedulePreview({
+            cron,
+            timezone,
+            nextRunAtUtc: null,
+            nextRunAtLocal: null
+          });
+        });
+    }, 220);
+
+    return () => window.clearTimeout(timer);
+  }, [token, scheduleCron, scheduleTimezone, systemTime?.timezone]);
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -541,6 +603,9 @@ export default function App() {
     setSecrets([]);
     setTemplates([]);
     setSchedules([]);
+    setSchedulePresets([]);
+    setSelectedSchedulePreset("");
+    setSchedulePreview(null);
     setDashboard(null);
     setSystemTime(null);
     setCurrentUser(null);
@@ -989,6 +1054,16 @@ export default function App() {
     await refreshDashboard();
   };
 
+  const handleApplySchedulePreset = () => {
+    if (!activeSchedulePreset) {
+      setFeedback("Select a schedule preset first", "error");
+      return;
+    }
+    setScheduleCron(activeSchedulePreset.cron);
+    setScheduleName(activeSchedulePreset.name);
+    setFeedback(`Applied preset: ${activeSchedulePreset.name}`, "info");
+  };
+
   const handleCreateSchedule = async () => {
     if (!activeWorkflow) {
       setFeedback("Select a workflow first", "error");
@@ -1208,6 +1283,18 @@ export default function App() {
           {isActionLoading("create-template") ? "Creating..." : "Create From Template"}
         </button>
         <h3>Schedules</h3>
+        <div className="schedule-preset-row">
+          <select value={selectedSchedulePreset} onChange={(e) => setSelectedSchedulePreset(e.target.value)}>
+            <option value="">Select preset</option>
+            {schedulePresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+          <button onClick={handleApplySchedulePreset}>Use Preset</button>
+        </div>
+        {activeSchedulePreset ? <small>{activeSchedulePreset.description}</small> : null}
         <input value={scheduleName} onChange={(e) => setScheduleName(e.target.value)} placeholder="Schedule name" />
         <input value={scheduleCron} onChange={(e) => setScheduleCron(e.target.value)} placeholder="Cron (local time)" />
         <input
@@ -1215,6 +1302,11 @@ export default function App() {
           onChange={(e) => setScheduleTimezone(e.target.value)}
           placeholder={systemTime?.timezone || "Timezone"}
         />
+        {schedulePreview ? (
+          <small>
+            Next run: {schedulePreview.nextRunAtLocal || "No upcoming run found"} ({schedulePreview.timezone})
+          </small>
+        ) : null}
         <label className="inline-option">
           <input type="checkbox" checked={scheduleTestMode} onChange={(e) => setScheduleTestMode(e.target.checked)} />
           <span>Run in test mode</span>
@@ -1234,6 +1326,10 @@ export default function App() {
                 <small>
                   {schedule.cron} ({schedule.timezone})
                 </small>
+                <small>Next run: {schedule.nextRunAtLocal || "n/a"}</small>
+                {schedule.lastRunAt ? <small>Last run: {new Date(schedule.lastRunAt).toLocaleString()}</small> : null}
+                {schedule.lastRunStatus ? <small>Last status: {schedule.lastRunStatus}</small> : null}
+                {schedule.lastRunError ? <small>Error: {schedule.lastRunError}</small> : null}
               </div>
               <div className="schedule-actions">
                 <button onClick={() => handleRunScheduleNow(schedule.id).catch(showError)}>Run now</button>

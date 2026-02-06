@@ -11,7 +11,7 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 - Draft/publish workflow lifecycle with version rollback
 - Retry/timeout/checkpoint execution engine with resume support
 - Manual approvals, run timeline, and diff vs last success
-- Workflow templates and cron-based scheduled runs (local timezone)
+- Workflow templates and cron scheduling with presets + next-run preview (local timezone)
 - Local auth + RBAC foundations + webhook integrations
 - Local LLM integration through Ollama for transform nodes
 

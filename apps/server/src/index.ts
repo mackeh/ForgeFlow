@@ -32,6 +32,7 @@ import {
   normalizeScheduleTimezone,
   updateSchedule
 } from "./lib/scheduleStore.js";
+import { buildSchedulePreview, listSchedulePresets } from "./lib/schedulePreview.js";
 import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
 import {
   createUser,
@@ -331,7 +332,26 @@ app.get("/api/schedules", canManageSchedules, async (req, res) => {
   const workflowId =
     typeof req.query.workflowId === "string" && req.query.workflowId.trim() ? req.query.workflowId.trim() : undefined;
   const schedules = await listSchedules(workflowId);
-  res.json(schedules);
+  res.json(
+    schedules.map((schedule) => ({
+      ...schedule,
+      ...buildSchedulePreview(schedule.cron, schedule.timezone)
+    }))
+  );
+});
+
+app.get("/api/schedules/presets", canManageSchedules, (_req, res) => {
+  res.json(listSchedulePresets());
+});
+
+app.get("/api/schedules/preview", canManageSchedules, async (req, res) => {
+  const cron = typeof req.query.cron === "string" ? req.query.cron.trim() : "";
+  const timezone = normalizeScheduleTimezone(typeof req.query.timezone === "string" ? req.query.timezone : undefined);
+  if (!cron) {
+    res.status(400).json({ error: "Cron is required" });
+    return;
+  }
+  res.json(buildSchedulePreview(cron, timezone));
 });
 
 app.post("/api/schedules", canManageSchedules, async (req, res) => {
@@ -362,7 +382,10 @@ app.post("/api/schedules", canManageSchedules, async (req, res) => {
       timezone: normalizeScheduleTimezone(parsed.data.timezone)
     });
     await scheduler.refresh();
-    res.json(schedule);
+    res.json({
+      ...schedule,
+      ...buildSchedulePreview(schedule.cron, schedule.timezone)
+    });
   } catch (error) {
     res.status(400).json({ error: String(error) });
   }
@@ -385,7 +408,10 @@ app.put("/api/schedules/:id", canManageSchedules, async (req, res) => {
   try {
     const schedule = await updateSchedule(req.params.id, parsed.data);
     await scheduler.refresh();
-    res.json(schedule);
+    res.json({
+      ...schedule,
+      ...buildSchedulePreview(schedule.cron, schedule.timezone)
+    });
   } catch (error) {
     res.status(404).json({ error: String(error) });
   }
