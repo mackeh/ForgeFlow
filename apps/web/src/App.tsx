@@ -223,6 +223,40 @@ export default function App() {
   }, [activeRun?.id, activeRun?.status]);
 
   useEffect(() => {
+    const rawNodeStates =
+      activeRun?.nodeStates && typeof activeRun.nodeStates === "object" && !Array.isArray(activeRun.nodeStates)
+        ? (activeRun.nodeStates as Record<string, any>)
+        : null;
+
+    setNodes((current) =>
+      current.map((node) => {
+        const prevData = (node.data || {}) as Record<string, any>;
+        const state = rawNodeStates?.[node.id];
+        const nextData: Record<string, any> = { ...prevData };
+
+        if (state && typeof state === "object") {
+          nextData.__runStatus = String(state.status || "");
+          nextData.__runDurationMs = typeof state.durationMs === "number" ? state.durationMs : undefined;
+          nextData.__runAttempts = typeof state.attempts === "number" ? state.attempts : undefined;
+          nextData.__runError = state.error ? String(state.error) : "";
+        } else {
+          delete nextData.__runStatus;
+          delete nextData.__runDurationMs;
+          delete nextData.__runAttempts;
+          delete nextData.__runError;
+        }
+
+        const unchanged =
+          prevData.__runStatus === nextData.__runStatus &&
+          prevData.__runDurationMs === nextData.__runDurationMs &&
+          prevData.__runAttempts === nextData.__runAttempts &&
+          prevData.__runError === nextData.__runError;
+        return unchanged ? node : { ...node, data: nextData };
+      })
+    );
+  }, [activeRun?.id, activeRun?.status, activeRun?.nodeStates]);
+
+  useEffect(() => {
     if (!token) return;
     refreshDashboard(dashboardDays).catch(showError);
   }, [dashboardDays, systemTime?.timezone, token]);
@@ -1019,6 +1053,16 @@ export default function App() {
     };
   };
 
+  const miniMapNodeColor = (node: any) => {
+    const status = String(node?.data?.__runStatus || "");
+    if (status === "running") return "#2cb9b0";
+    if (status === "succeeded") return "#3abf6f";
+    if (status === "failed") return "#d64e3a";
+    if (status === "skipped") return "#6a7682";
+    if (status === "queued") return "#f5b01f";
+    return "#304050";
+  };
+
   const currentPermissions: string[] = Array.isArray(currentUser?.permissions) ? currentUser.permissions : [];
   const isAdminUser = currentPermissions.includes("*");
   const canManageUsers = isAdminUser || currentPermissions.includes("users:manage");
@@ -1411,7 +1455,7 @@ export default function App() {
           fitView
         >
           <Background gap={20} />
-          <MiniMap />
+          <MiniMap nodeColor={miniMapNodeColor} />
           <Controls />
         </ReactFlow>
 
