@@ -5,6 +5,11 @@ export type SchedulePreset = {
   cron: string;
 };
 
+export type UpcomingRun = {
+  atUtc: string;
+  atLocal: string;
+};
+
 type ParsedField = {
   values: Set<number>;
   wildcard: boolean;
@@ -227,15 +232,12 @@ function formatLocal(date: Date, timezone: string) {
 
 const defaultScanWindowMinutes = 60 * 24 * 370;
 
-export function nextRunAt(
-  cronExpression: string,
+function nextRunAtFromParsed(
+  parsed: ParsedCron,
   timezone: string,
-  fromDate = new Date(),
-  scanWindowMinutes = defaultScanWindowMinutes
+  fromDate: Date,
+  scanWindowMinutes: number
 ) {
-  const parsed = parseCronExpression(cronExpression);
-  if (!parsed) return null;
-
   const startMs = fromDate.getTime();
   let cursor = new Date(startMs - (startMs % 60_000) + 60_000);
 
@@ -247,6 +249,59 @@ export function nextRunAt(
     cursor = new Date(cursor.getTime() + 60_000);
   }
   return null;
+}
+
+export function nextRunAt(
+  cronExpression: string,
+  timezone: string,
+  fromDate = new Date(),
+  scanWindowMinutes = defaultScanWindowMinutes
+) {
+  const parsed = parseCronExpression(cronExpression);
+  if (!parsed) return null;
+  return nextRunAtFromParsed(parsed, timezone, fromDate, scanWindowMinutes);
+}
+
+export function nextRunsAt(
+  cronExpression: string,
+  timezone: string,
+  options: {
+    fromDate?: Date;
+    count?: number;
+    scanWindowMinutes?: number;
+  } = {}
+) {
+  const parsed = parseCronExpression(cronExpression);
+  if (!parsed) return [] as Date[];
+
+  const fromDate = options.fromDate || new Date();
+  const count = Math.max(1, Math.min(200, options.count || 1));
+  const scanWindowMinutes = Math.max(1, options.scanWindowMinutes || defaultScanWindowMinutes);
+
+  const out: Date[] = [];
+  let cursor = new Date(fromDate.getTime());
+  for (let i = 0; i < count; i += 1) {
+    const next = nextRunAtFromParsed(parsed, timezone, cursor, scanWindowMinutes);
+    if (!next) break;
+    out.push(next);
+    cursor = new Date(next.getTime() + 60_000);
+  }
+  return out;
+}
+
+export function buildUpcomingRuns(
+  cronExpression: string,
+  timezone: string,
+  options: {
+    fromDate?: Date;
+    count?: number;
+    scanWindowMinutes?: number;
+  } = {}
+) {
+  return nextRunsAt(cronExpression, timezone, options).map((date) => ({
+    atUtc: date.toISOString(),
+    atLocal: formatLocal(date, timezone)
+  }));
 }
 
 export function buildSchedulePreview(cronExpression: string, timezone: string, fromDate = new Date()) {

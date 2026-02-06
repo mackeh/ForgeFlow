@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 import cron from "node-cron";
+import type { MaintenanceWindow } from "./scheduleRules.js";
 
 export type StoredSchedule = {
   id: string;
@@ -11,6 +12,8 @@ export type StoredSchedule = {
   timezone: string;
   enabled: boolean;
   testMode: boolean;
+  dependsOnScheduleId?: string;
+  maintenanceWindows?: MaintenanceWindow[];
   inputData?: unknown;
   lastRunAt?: string;
   lastRunStatus?: string;
@@ -73,6 +76,37 @@ export function assertValidCron(expression: string) {
   }
 }
 
+export function normalizeMaintenanceWindows(raw: unknown): MaintenanceWindow[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const normalized: MaintenanceWindow[] = raw
+    .map((window) => {
+      if (!window || typeof window !== "object") return null;
+      const value = window as Record<string, unknown>;
+      const start = String(value.start || "").trim();
+      const end = String(value.end || "").trim();
+      if (!/^([01]?\d|2[0-3]):([0-5]\d)$/.test(start)) return null;
+      if (!/^([01]?\d|2[0-3]):([0-5]\d)$/.test(end)) return null;
+
+      const weekdays = Array.isArray(value.weekdays)
+        ? Array.from(
+            new Set(
+              value.weekdays
+                .map((item) => Number(item))
+                .filter((item) => Number.isInteger(item) && item >= 0 && item <= 6)
+            )
+          )
+        : undefined;
+
+      return {
+        start,
+        end,
+        weekdays: weekdays && weekdays.length ? weekdays : undefined
+      };
+    })
+    .filter(Boolean) as MaintenanceWindow[];
+  return normalized.length ? normalized : undefined;
+}
+
 export async function listSchedules(workflowId?: string) {
   const store = await readStore();
   if (!workflowId) return store.schedules;
@@ -91,6 +125,8 @@ export async function createSchedule(payload: {
   timezone?: string;
   enabled?: boolean;
   testMode?: boolean;
+  dependsOnScheduleId?: string;
+  maintenanceWindows?: MaintenanceWindow[];
   inputData?: unknown;
 }) {
   assertValidCron(payload.cron);
@@ -104,6 +140,8 @@ export async function createSchedule(payload: {
     timezone: normalizeScheduleTimezone(payload.timezone),
     enabled: payload.enabled !== false,
     testMode: Boolean(payload.testMode),
+    dependsOnScheduleId: payload.dependsOnScheduleId?.trim() || undefined,
+    maintenanceWindows: normalizeMaintenanceWindows(payload.maintenanceWindows),
     inputData: payload.inputData,
     createdAt: now,
     updatedAt: now
@@ -121,6 +159,8 @@ export async function updateSchedule(
     timezone: string;
     enabled: boolean;
     testMode: boolean;
+    dependsOnScheduleId: string;
+    maintenanceWindows: MaintenanceWindow[];
     inputData: unknown;
     lastRunAt: string;
     lastRunStatus: string;
@@ -142,6 +182,14 @@ export async function updateSchedule(
     name: patch.name !== undefined ? patch.name.trim() : existing.name,
     cron: patch.cron !== undefined ? patch.cron.trim() : existing.cron,
     timezone: normalizeScheduleTimezone(patch.timezone || existing.timezone),
+    dependsOnScheduleId:
+      patch.dependsOnScheduleId !== undefined
+        ? patch.dependsOnScheduleId.trim() || undefined
+        : existing.dependsOnScheduleId,
+    maintenanceWindows:
+      patch.maintenanceWindows !== undefined
+        ? normalizeMaintenanceWindows(patch.maintenanceWindows)
+        : existing.maintenanceWindows,
     updatedAt: new Date().toISOString()
   };
   store.schedules[idx] = next;

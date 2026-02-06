@@ -531,6 +531,93 @@ async function executeNode(args: {
       context.__loopMeta[node.id] = { count: value.length, itemKey, indexKey, outputKey };
       return { outputKey };
     }
+    case "parallel_execute": {
+      const tasks = Array.isArray(node.data?.tasks) ? node.data.tasks : [];
+      if (!tasks.length) {
+        throw new Error("parallel_execute requires at least one task");
+      }
+      const outputKey = String(node.data?.outputKey || "parallelResult");
+      const allowPartial = Boolean(node.data?.allowPartial);
+      const taskTimeoutMs = Number(node.data?.taskTimeoutMs || 15_000);
+
+      const results = await Promise.allSettled(
+        tasks.map(async (task: any, idx: number) => {
+          const taskId = String(task?.id || `task-${idx + 1}`);
+          const taskType = String(task?.type || "http_request");
+
+          if (taskType === "http_request") {
+            await withTimeout(
+              runHttp(prisma, task, context),
+              taskTimeoutMs,
+              `parallel_execute task ${taskId} timed out`
+            );
+            return {
+              taskId,
+              taskType,
+              status: "succeeded" as const,
+              outputKey: task?.saveAs ? String(task.saveAs) : undefined
+            };
+          }
+
+          if (taskType === "set_variable") {
+            const key = String(task?.key || "");
+            if (!key) throw new Error(`parallel_execute task ${taskId} missing key`);
+            context[key] = await interpolateWithSecrets(task?.value, context, prisma);
+            return {
+              taskId,
+              taskType,
+              status: "succeeded" as const,
+              outputKey: key
+            };
+          }
+
+          if (taskType === "transform_llm") {
+            const llmOutputKey = String(task?.outputKey || "");
+            if (!llmOutputKey) {
+              throw new Error(`parallel_execute task ${taskId} missing outputKey`);
+            }
+            await withTimeout(
+              runLlm(task, context),
+              taskTimeoutMs,
+              `parallel_execute task ${taskId} timed out`
+            );
+            return {
+              taskId,
+              taskType,
+              status: "succeeded" as const,
+              outputKey: llmOutputKey
+            };
+          }
+
+          throw new Error(`parallel_execute task ${taskId} has unsupported type "${taskType}"`);
+        })
+      );
+
+      const summary = results.map((result, idx) => {
+        const taskId = String(tasks[idx]?.id || `task-${idx + 1}`);
+        const taskType = String(tasks[idx]?.type || "http_request");
+        if (result.status === "fulfilled") {
+          return result.value;
+        }
+        return {
+          taskId,
+          taskType,
+          status: "failed" as const,
+          error: String(result.reason)
+        };
+      });
+
+      const failed = summary.filter((item) => item.status === "failed");
+      context[outputKey] = summary;
+      if (failed.length && !allowPartial) {
+        throw new Error(
+          `parallel_execute failed ${failed.length}/${summary.length} tasks (${failed
+            .map((item) => String(item.taskId))
+            .join(", ")})`
+        );
+      }
+      return { outputKey };
+    }
     case "playwright_navigate": {
       const headless = resolvePlaywrightHeadless(node, executionDefaults);
       const ensured = await ensurePage(browser, page, headless);

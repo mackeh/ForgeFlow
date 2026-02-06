@@ -285,3 +285,66 @@ test("transform_llm node uses deterministic fallback when model output is invali
     global.fetch = originalFetch;
   }
 });
+
+test("parallel_execute runs independent tasks concurrently and stores summary output", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "parallel",
+        data: {
+          type: "parallel_execute",
+          outputKey: "parallelSummary",
+          tasks: [
+            { id: "set-a", type: "set_variable", key: "alpha", value: "A" },
+            { id: "set-b", type: "set_variable", key: "beta", value: "B" }
+          ]
+        }
+      }
+    ],
+    [{ id: "e-start-parallel", source: "start", target: "parallel" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({ id: "run-parallel", testMode: true })
+  });
+
+  await startRun(harness.prisma, "run-parallel");
+  const finished = harness.getRun("run-parallel");
+
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(finished?.context?.alpha, "A");
+  assert.equal(finished?.context?.beta, "B");
+  assert.equal(Array.isArray(finished?.context?.parallelSummary), true);
+  assert.equal(finished?.context?.parallelSummary?.length, 2);
+});
+
+test("parallel_execute fails run when any task fails and allowPartial is false", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "parallel",
+        data: {
+          type: "parallel_execute",
+          outputKey: "parallelSummary",
+          tasks: [{ id: "bad-set", type: "set_variable", value: "missing key" }]
+        }
+      }
+    ],
+    [{ id: "e-start-parallel", source: "start", target: "parallel" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({ id: "run-parallel-fail", testMode: true })
+  });
+
+  await startRun(harness.prisma, "run-parallel-fail");
+  const finished = harness.getRun("run-parallel-fail");
+
+  assert.equal(finished?.status, "FAILED");
+  assert.equal(finished?.nodeStates?.parallel?.status, "failed");
+  assert.equal(String(finished?.nodeStates?.parallel?.error || "").includes("parallel_execute failed"), true);
+});

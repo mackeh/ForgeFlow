@@ -57,6 +57,7 @@ Tips:
 - Use `Auto Layout` to reorganize nodes quickly.
 - Use `Snap: On/Off` depending on precision vs free placement.
 - Use `Ctrl+S` save, `Ctrl+T` test run, `Ctrl+R` run.
+- Use `parallel_execute` when you need fan-out tasks (HTTP/set-variable/LLM) in one node.
 
 ## 5. Run lifecycle (test, publish, production)
 
@@ -109,14 +110,17 @@ In the left sidebar (`Workflow` section):
 1. Open `Schedules` section.
 2. Choose a preset, click `Use Preset`, or type your own cron.
 3. Set timezone.
-4. Verify `Next run` preview.
-5. Click `Add Schedule`.
+4. Optional: select `Depends on` to build schedule chains.
+5. Optional: enable `Maintenance window` to skip executions during blocked periods.
+6. Verify `Next run` preview.
+7. Click `Add Schedule`.
 
 Schedule management:
 - `Run now`
 - `Enable`/`Disable`
 - `Delete`
 - Card shows last run time/status/error
+- `Upcoming Calendar` groups upcoming runs by local date
 
 ## 10. Secrets and LLM transforms
 

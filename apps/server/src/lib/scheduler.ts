@@ -3,6 +3,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import { getWorkflowDefinitionForRun } from "./workflows.js";
 import { startRun } from "./runner.js";
 import { getSchedule, listSchedules, updateSchedule } from "./scheduleStore.js";
+import { maintenanceBlockReason } from "./scheduleRules.js";
 
 function formatLocal(date: Date, timezone: string) {
   return new Intl.DateTimeFormat("sv-SE", {
@@ -91,6 +92,41 @@ export class WorkflowScheduler {
     try {
       const schedule = await getSchedule(scheduleId);
       if (!schedule || !schedule.enabled) return;
+      const now = new Date();
+
+      if (schedule.dependsOnScheduleId) {
+        const dependency = await getSchedule(schedule.dependsOnScheduleId);
+        if (!dependency) {
+          await updateSchedule(scheduleId, {
+            lastRunAt: now.toISOString(),
+            lastRunStatus: "SKIPPED",
+            lastRunError: `Dependency schedule not found: ${schedule.dependsOnScheduleId}`
+          });
+          return;
+        }
+        if (dependency.lastRunStatus !== "SUCCEEDED") {
+          await updateSchedule(scheduleId, {
+            lastRunAt: now.toISOString(),
+            lastRunStatus: "SKIPPED",
+            lastRunError: `Dependency not ready: ${dependency.name} (${dependency.lastRunStatus || "never"})`
+          });
+          return;
+        }
+      }
+
+      const maintenanceReason = maintenanceBlockReason(
+        now,
+        schedule.timezone,
+        schedule.maintenanceWindows || []
+      );
+      if (maintenanceReason) {
+        await updateSchedule(scheduleId, {
+          lastRunAt: now.toISOString(),
+          lastRunStatus: "SKIPPED",
+          lastRunError: maintenanceReason
+        });
+        return;
+      }
 
       const workflow = await this.prisma.workflow.findUnique({ where: { id: schedule.workflowId } });
       if (!workflow) {
@@ -103,7 +139,6 @@ export class WorkflowScheduler {
       }
 
       const { version } = await getWorkflowDefinitionForRun(this.prisma, schedule.workflowId, schedule.testMode);
-      const now = new Date();
       const localTimestamp = formatLocal(now, schedule.timezone);
 
       const run = await this.prisma.run.create({

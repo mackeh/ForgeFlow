@@ -324,6 +324,75 @@ const templates: WorkflowTemplate[] = [
     }
   },
   {
+    id: "parallel-fanout-sync",
+    name: "Parallel Fan-Out Sync",
+    description: "Run multiple data fetch/transform tasks concurrently and submit aggregated result.",
+    category: "data",
+    difficulty: "advanced",
+    useCase: "Speed up multi-source integrations with parallel task execution.",
+    tags: ["parallel", "http", "llm", "fanout"],
+    definition: {
+      nodes: [
+        { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
+        {
+          id: "parallel",
+          type: "action",
+          position: { x: 330, y: 80 },
+          data: {
+            type: "parallel_execute",
+            label: "Parallel Tasks",
+            outputKey: "parallelSummary",
+            allowPartial: false,
+            tasks: [
+              {
+                id: "source-a",
+                type: "http_request",
+                method: "GET",
+                url: "https://example.com/api/source-a",
+                saveAs: "sourceA"
+              },
+              {
+                id: "source-b",
+                type: "http_request",
+                method: "GET",
+                url: "https://example.com/api/source-b",
+                saveAs: "sourceB"
+              },
+              {
+                id: "normalize-a",
+                type: "transform_llm",
+                inputKey: "sourceA",
+                outputKey: "normalizedA",
+                strictJson: true
+              }
+            ]
+          }
+        },
+        {
+          id: "submit",
+          type: "action",
+          position: { x: 620, y: 80 },
+          data: {
+            type: "http_request",
+            label: "Submit Combined",
+            method: "POST",
+            url: "https://example.com/api/combined",
+            body: {
+              a: "{{normalizedA}}",
+              b: "{{sourceB}}",
+              summary: "{{parallelSummary}}"
+            }
+          }
+        }
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "parallel" },
+        { id: "e2", source: "parallel", target: "submit" }
+      ],
+      execution: executionDefaults
+    }
+  },
+  {
     id: "desktop-assisted-submit",
     name: "Desktop Assisted Submit",
     description: "Use desktop image waits/clicks, type values, and require explicit approval before submit.",

@@ -159,6 +159,21 @@ export function getSchedulePresets() {
   return request("/api/schedules/presets");
 }
 
+export function getUpcomingSchedules(params?: {
+  workflowId?: string;
+  days?: number;
+  limit?: number;
+  perSchedule?: number;
+}) {
+  const q = new URLSearchParams();
+  if (params?.workflowId) q.set("workflowId", params.workflowId);
+  if (params?.days !== undefined) q.set("days", String(params.days));
+  if (params?.limit !== undefined) q.set("limit", String(params.limit));
+  if (params?.perSchedule !== undefined) q.set("perSchedule", String(params.perSchedule));
+  const query = q.toString();
+  return request(`/api/schedules/upcoming${query ? `?${query}` : ""}`);
+}
+
 export function previewSchedule(cron: string, timezone?: string) {
   const q = new URLSearchParams({ cron });
   if (timezone) q.set("timezone", timezone);
@@ -172,6 +187,8 @@ export function createSchedule(payload: {
   timezone?: string;
   enabled?: boolean;
   testMode?: boolean;
+  dependsOnScheduleId?: string;
+  maintenanceWindows?: Array<{ start: string; end: string; weekdays?: number[] }>;
   inputData?: any;
 }) {
   return request("/api/schedules", {
@@ -186,6 +203,8 @@ export function updateSchedule(id: string, payload: {
   timezone?: string;
   enabled?: boolean;
   testMode?: boolean;
+  dependsOnScheduleId?: string;
+  maintenanceWindows?: Array<{ start: string; end: string; weekdays?: number[] }>;
   inputData?: any;
 }) {
   return request(`/api/schedules/${id}`, {

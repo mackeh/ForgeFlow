@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSchedulePreview, listSchedulePresets, nextRunAt } from "./schedulePreview.js";
+import { buildSchedulePreview, buildUpcomingRuns, listSchedulePresets, nextRunAt, nextRunsAt } from "./schedulePreview.js";
 
 test("listSchedulePresets returns built-in presets", () => {
   const presets = listSchedulePresets();
@@ -29,3 +29,19 @@ test("buildSchedulePreview returns null next run for invalid cron", () => {
   assert.equal(preview.nextRunAtLocal, null);
 });
 
+test("nextRunsAt returns a sequence of upcoming runs", () => {
+  const from = new Date("2026-02-06T10:07:13.000Z");
+  const next = nextRunsAt("*/15 * * * *", "UTC", { fromDate: from, count: 3 });
+  assert.equal(next.length, 3);
+  assert.equal(next[0].toISOString(), "2026-02-06T10:15:00.000Z");
+  assert.equal(next[1].toISOString(), "2026-02-06T10:30:00.000Z");
+  assert.equal(next[2].toISOString(), "2026-02-06T10:45:00.000Z");
+});
+
+test("buildUpcomingRuns returns formatted UTC/local entries", () => {
+  const from = new Date("2026-02-06T10:07:13.000Z");
+  const runs = buildUpcomingRuns("0 * * * *", "UTC", { fromDate: from, count: 2 });
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0].atUtc, "2026-02-06T11:00:00.000Z");
+  assert.equal(typeof runs[0].atLocal, "string");
+});

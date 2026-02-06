@@ -33,6 +33,7 @@ import {
   getRunDiff,
   getSchedulePresets,
   getSchedules,
+  getUpcomingSchedules,
   getSecrets,
   getSystemTime,
   getTemplates,
@@ -98,6 +99,15 @@ type AuditEvent = {
   resourceId?: string;
   success: boolean;
   message?: string;
+};
+type UpcomingScheduleItem = {
+  scheduleId: string;
+  scheduleName: string;
+  workflowId: string;
+  cron: string;
+  timezone: string;
+  atUtc: string;
+  atLocal: string;
 };
 type RunArtifact = {
   nodeId?: string;
@@ -167,9 +177,15 @@ export default function App() {
   const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
   const [scheduleTimezone, setScheduleTimezone] = useState("");
   const [scheduleTestMode, setScheduleTestMode] = useState(false);
+  const [scheduleDependsOnId, setScheduleDependsOnId] = useState("");
+  const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
+  const [maintenanceStart, setMaintenanceStart] = useState("22:00");
+  const [maintenanceEnd, setMaintenanceEnd] = useState("23:59");
+  const [maintenanceWeekdays, setMaintenanceWeekdays] = useState("1,2,3,4,5");
   const [schedulePresets, setSchedulePresets] = useState<SchedulePreset[]>([]);
   const [selectedSchedulePreset, setSelectedSchedulePreset] = useState("");
   const [schedulePreview, setSchedulePreview] = useState<SchedulePreview | null>(null);
+  const [upcomingSchedules, setUpcomingSchedules] = useState<UpcomingScheduleItem[]>([]);
   const [dashboard, setDashboard] = useState<any | null>(null);
   const [dashboardDays, setDashboardDays] = useState(7);
   const [systemTime, setSystemTime] = useState<any | null>(null);
@@ -210,6 +226,7 @@ export default function App() {
       { label: "Manual Approval", type: "manual_approval" },
       { label: "Conditional Branch", type: "conditional_branch" },
       { label: "Loop Iterate", type: "loop_iterate" },
+      { label: "Parallel Execute", type: "parallel_execute" },
       { label: "Web Navigate", type: "playwright_navigate" },
       { label: "Web Click", type: "playwright_click" },
       { label: "Web Fill", type: "playwright_fill" },
@@ -297,6 +314,22 @@ export default function App() {
       .slice(0, 8);
   }, [activeRun?.id, activeRun?.logs]);
 
+  const upcomingScheduleGroups = useMemo(() => {
+    const groups = new Map<string, UpcomingScheduleItem[]>();
+    for (const item of upcomingSchedules) {
+      const localKey = String(item.atLocal || "").split(" ")[0] || "Unknown date";
+      const list = groups.get(localKey) || [];
+      list.push(item);
+      groups.set(localKey, list);
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, items]) => ({
+        date,
+        items: items.sort((x, y) => x.atLocal.localeCompare(y.atLocal))
+      }));
+  }, [upcomingSchedules]);
+
   useEffect(() => {
     if (!token) return;
     getCurrentUser()
@@ -349,6 +382,7 @@ export default function App() {
 
   useEffect(() => {
     setWorkflowName(activeWorkflow?.name || "");
+    setScheduleDependsOnId("");
   }, [activeWorkflow?.id, activeWorkflow?.name]);
 
   useEffect(() => {
@@ -569,10 +603,18 @@ export default function App() {
   async function refreshSchedules(workflowId?: string) {
     if (!workflowId) {
       setSchedules([]);
+      setUpcomingSchedules([]);
       return;
     }
     const list = await getSchedules(workflowId);
     setSchedules(list || []);
+    const upcoming = await getUpcomingSchedules({
+      workflowId,
+      days: 14,
+      limit: 80,
+      perSchedule: 6
+    });
+    setUpcomingSchedules(Array.isArray(upcoming?.items) ? upcoming.items : []);
   }
 
   async function refreshDashboard(days = dashboardDays) {
@@ -681,9 +723,15 @@ export default function App() {
     setSecrets([]);
     setTemplates([]);
     setSchedules([]);
+    setScheduleDependsOnId("");
+    setMaintenanceEnabled(false);
+    setMaintenanceStart("22:00");
+    setMaintenanceEnd("23:59");
+    setMaintenanceWeekdays("1,2,3,4,5");
     setSchedulePresets([]);
     setSelectedSchedulePreset("");
     setSchedulePreview(null);
+    setUpcomingSchedules([]);
     setDashboard(null);
     setSystemTime(null);
     setCurrentUser(null);
@@ -896,6 +944,7 @@ export default function App() {
       validate_record: ["inputKey"],
       submit_guard: ["inputKey"],
       loop_iterate: ["inputKey"],
+      parallel_execute: ["tasks"],
       playwright_navigate: ["url"],
       playwright_click: ["selector"],
       playwright_fill: ["selector", "value"],
@@ -910,6 +959,12 @@ export default function App() {
       const fields = requiredNodeFields[nodeType] || [];
       fields.forEach((field) => {
         const value = node?.data?.[field];
+        if (field === "tasks") {
+          if (!Array.isArray(value) || value.length === 0) {
+            validationErrors.push(`Node "${node.data?.label || node.id}" requires at least one task.`);
+          }
+          return;
+        }
         if (value === undefined || value === null || String(value).trim() === "") {
           validationErrors.push(`Node "${node.data?.label || node.id}" is missing "${field}".`);
         }
@@ -1166,11 +1221,40 @@ export default function App() {
     setFeedback(`Applied preset: ${activeSchedulePreset.name}`, "info");
   };
 
+  const parseMaintenanceWeekdays = () => {
+    const parsed = maintenanceWeekdays
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+    return Array.from(new Set(parsed));
+  };
+
   const handleCreateSchedule = async () => {
     if (!activeWorkflow) {
       setFeedback("Select a workflow first", "error");
       return;
     }
+    const dependsOnScheduleId = scheduleDependsOnId.trim();
+    if (dependsOnScheduleId && activeWorkflow && schedules.some((row) => row.id === dependsOnScheduleId && row.workflowId !== activeWorkflow.id)) {
+      setFeedback("Dependency schedule must belong to the selected workflow", "error");
+      return;
+    }
+    const timeRegex = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+    if (maintenanceEnabled && (!timeRegex.test(maintenanceStart.trim()) || !timeRegex.test(maintenanceEnd.trim()))) {
+      setFeedback("Maintenance window must use HH:MM format", "error");
+      return;
+    }
+    const weekdays = parseMaintenanceWeekdays();
+    const maintenanceWindows =
+      maintenanceEnabled && maintenanceStart.trim() && maintenanceEnd.trim()
+        ? [
+            {
+              start: maintenanceStart.trim(),
+              end: maintenanceEnd.trim(),
+              weekdays: weekdays.length ? weekdays : undefined
+            }
+          ]
+        : undefined;
     const timezone = scheduleTimezone || systemTime?.timezone;
     const created = await createSchedule({
       workflowId: activeWorkflow.id,
@@ -1178,9 +1262,12 @@ export default function App() {
       cron: scheduleCron.trim(),
       timezone,
       enabled: true,
-      testMode: scheduleTestMode
+      testMode: scheduleTestMode,
+      dependsOnScheduleId: dependsOnScheduleId || undefined,
+      maintenanceWindows
     });
     setSchedules((prev) => [created, ...prev]);
+    await refreshSchedules(activeWorkflow.id);
     setFeedback("Schedule created", "success");
     await refreshDashboard();
   };
@@ -1188,6 +1275,9 @@ export default function App() {
   const handleToggleSchedule = async (schedule: any) => {
     const updated = await updateSchedule(schedule.id, { enabled: !schedule.enabled });
     setSchedules((prev) => prev.map((row) => (row.id === schedule.id ? updated : row)));
+    if (activeWorkflow) {
+      await refreshSchedules(activeWorkflow.id);
+    }
     setFeedback(updated.enabled ? "Schedule enabled" : "Schedule disabled", "success");
     await refreshDashboard();
   };
@@ -1195,6 +1285,9 @@ export default function App() {
   const handleDeleteSchedule = async (scheduleId: string) => {
     await deleteSchedule(scheduleId);
     setSchedules((prev) => prev.filter((row) => row.id !== scheduleId));
+    if (activeWorkflow) {
+      await refreshSchedules(activeWorkflow.id);
+    }
     setFeedback("Schedule deleted", "success");
     await refreshDashboard();
   };
@@ -1205,6 +1298,7 @@ export default function App() {
     await refreshDashboard();
     if (activeWorkflow) {
       await refreshWorkflowMeta(activeWorkflow.id);
+      await refreshSchedules(activeWorkflow.id);
     }
   };
 
@@ -1405,6 +1499,31 @@ export default function App() {
           onChange={(e) => setScheduleTimezone(e.target.value)}
           placeholder={systemTime?.timezone || "Timezone"}
         />
+        <select value={scheduleDependsOnId} onChange={(e) => setScheduleDependsOnId(e.target.value)}>
+          <option value="">No dependency</option>
+          {schedules
+            .filter((row) => row.workflowId === activeWorkflow?.id)
+            .map((row) => (
+              <option key={row.id} value={row.id}>
+                Depends on: {row.name}
+              </option>
+            ))}
+        </select>
+        <label className="inline-option">
+          <input type="checkbox" checked={maintenanceEnabled} onChange={(e) => setMaintenanceEnabled(e.target.checked)} />
+          <span>Maintenance window</span>
+        </label>
+        {maintenanceEnabled ? (
+          <>
+            <input value={maintenanceStart} onChange={(e) => setMaintenanceStart(e.target.value)} placeholder="Window start HH:MM" />
+            <input value={maintenanceEnd} onChange={(e) => setMaintenanceEnd(e.target.value)} placeholder="Window end HH:MM" />
+            <input
+              value={maintenanceWeekdays}
+              onChange={(e) => setMaintenanceWeekdays(e.target.value)}
+              placeholder="Weekdays CSV (0-6), e.g. 1,2,3,4,5"
+            />
+          </>
+        ) : null}
         {schedulePreview ? (
           <small>
             Next run: {schedulePreview.nextRunAtLocal || "No upcoming run found"} ({schedulePreview.timezone})
@@ -1429,6 +1548,12 @@ export default function App() {
                 <small>
                   {schedule.cron} ({schedule.timezone})
                 </small>
+                {schedule.dependsOnScheduleId ? <small>Depends on: {schedule.dependsOnScheduleId}</small> : null}
+                {Array.isArray(schedule.maintenanceWindows) && schedule.maintenanceWindows.length ? (
+                  <small>
+                    Maintenance: {schedule.maintenanceWindows[0]?.start} - {schedule.maintenanceWindows[0]?.end}
+                  </small>
+                ) : null}
                 <small>Next run: {schedule.nextRunAtLocal || "n/a"}</small>
                 {schedule.lastRunAt ? <small>Last run: {new Date(schedule.lastRunAt).toLocaleString()}</small> : null}
                 {schedule.lastRunStatus ? <small>Last status: {schedule.lastRunStatus}</small> : null}
@@ -1445,6 +1570,20 @@ export default function App() {
               </div>
             </div>
           ))}
+        </div>
+        <h4>Upcoming Calendar</h4>
+        <div className="schedule-calendar">
+          {upcomingScheduleGroups.slice(0, 8).map((group) => (
+            <div key={group.date} className="schedule-day">
+              <strong>{group.date}</strong>
+              {group.items.slice(0, 8).map((item) => (
+                <small key={`${item.scheduleId}-${item.atUtc}`}>
+                  {item.atLocal.split(" ")[1] || item.atLocal} · {item.scheduleName}
+                </small>
+              ))}
+            </div>
+          ))}
+          {!upcomingScheduleGroups.length ? <small>No upcoming schedule runs</small> : null}
         </div>
         {canManageUsers ? (
           <>

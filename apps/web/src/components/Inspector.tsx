@@ -101,6 +101,20 @@ function quickFieldsForType(nodeType: string): QuickField[] {
         { key: "indexKey", label: "Index Key" },
         { key: "outputKey", label: "Output Key" }
       ];
+    case "parallel_execute":
+      return [
+        { key: "outputKey", label: "Output Key" },
+        { key: "taskTimeoutMs", label: "Task Timeout (ms)", type: "number" },
+        {
+          key: "allowPartial",
+          label: "Allow Partial Success",
+          type: "select",
+          options: [
+            { label: "False", value: "false" },
+            { label: "True", value: "true" }
+          ]
+        }
+      ];
     case "desktop_click_image":
       return [
         { key: "imagePath", label: "Image Path" },
@@ -135,7 +149,7 @@ function coerceFieldValue(field: QuickField, value: string) {
     const num = Number(value);
     return Number.isFinite(num) ? num : value;
   }
-  if (field.key === "autoApproveInTestMode") {
+  if (field.key === "autoApproveInTestMode" || field.key === "allowPartial") {
     return value === "true";
   }
   return value;

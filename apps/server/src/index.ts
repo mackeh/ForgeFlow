@@ -32,7 +32,7 @@ import {
   normalizeScheduleTimezone,
   updateSchedule
 } from "./lib/scheduleStore.js";
-import { buildSchedulePreview, listSchedulePresets } from "./lib/schedulePreview.js";
+import { buildSchedulePreview, buildUpcomingRuns, listSchedulePresets } from "./lib/schedulePreview.js";
 import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
 import {
   createUser,
@@ -534,6 +534,47 @@ app.get("/api/schedules/presets", canManageSchedules, (_req, res) => {
   res.json(listSchedulePresets());
 });
 
+app.get("/api/schedules/upcoming", canManageSchedules, async (req, res) => {
+  const workflowId =
+    typeof req.query.workflowId === "string" && req.query.workflowId.trim() ? req.query.workflowId.trim() : undefined;
+  const daysRaw = typeof req.query.days === "string" ? Number(req.query.days) : 14;
+  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(90, Math.floor(daysRaw))) : 14;
+  const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 60;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 60;
+  const perScheduleRaw = typeof req.query.perSchedule === "string" ? Number(req.query.perSchedule) : 4;
+  const perSchedule = Number.isFinite(perScheduleRaw) ? Math.max(1, Math.min(24, Math.floor(perScheduleRaw))) : 4;
+
+  const schedules = (await listSchedules(workflowId)).filter((schedule) => schedule.enabled);
+  const scanWindowMinutes = days * 24 * 60;
+  const now = new Date();
+
+  const items = schedules
+    .flatMap((schedule) =>
+      buildUpcomingRuns(schedule.cron, schedule.timezone, {
+        fromDate: now,
+        count: perSchedule,
+        scanWindowMinutes
+      }).map((run) => ({
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        workflowId: schedule.workflowId,
+        cron: schedule.cron,
+        timezone: schedule.timezone,
+        atUtc: run.atUtc,
+        atLocal: run.atLocal
+      }))
+    )
+    .sort((a, b) => (a.atUtc < b.atUtc ? -1 : a.atUtc > b.atUtc ? 1 : 0))
+    .slice(0, limit);
+
+  res.json({
+    generatedAtUtc: now.toISOString(),
+    days,
+    total: items.length,
+    items
+  });
+});
+
 app.get("/api/schedules/preview", canManageSchedules, async (req, res) => {
   const cron = typeof req.query.cron === "string" ? req.query.cron.trim() : "";
   const timezone = normalizeScheduleTimezone(typeof req.query.timezone === "string" ? req.query.timezone : undefined);
@@ -545,6 +586,11 @@ app.get("/api/schedules/preview", canManageSchedules, async (req, res) => {
 });
 
 app.post("/api/schedules", canManageSchedules, async (req, res) => {
+  const maintenanceWindowSchema = z.object({
+    start: z.string(),
+    end: z.string(),
+    weekdays: z.array(z.number().int().min(0).max(6)).optional()
+  });
   const schema = z.object({
     workflowId: z.string(),
     name: z.string().optional(),
@@ -552,6 +598,8 @@ app.post("/api/schedules", canManageSchedules, async (req, res) => {
     timezone: z.string().optional(),
     enabled: z.boolean().optional(),
     testMode: z.boolean().optional(),
+    dependsOnScheduleId: z.string().optional(),
+    maintenanceWindows: z.array(maintenanceWindowSchema).optional(),
     inputData: z.any().optional()
   });
   const parsed = schema.safeParse(req.body || {});
@@ -598,12 +646,19 @@ app.post("/api/schedules", canManageSchedules, async (req, res) => {
 });
 
 app.put("/api/schedules/:id", canManageSchedules, async (req, res) => {
+  const maintenanceWindowSchema = z.object({
+    start: z.string(),
+    end: z.string(),
+    weekdays: z.array(z.number().int().min(0).max(6)).optional()
+  });
   const schema = z.object({
     name: z.string().optional(),
     cron: z.string().optional(),
     timezone: z.string().optional(),
     enabled: z.boolean().optional(),
     testMode: z.boolean().optional(),
+    dependsOnScheduleId: z.string().optional(),
+    maintenanceWindows: z.array(maintenanceWindowSchema).optional(),
     inputData: z.any().optional()
   });
   const parsed = schema.safeParse(req.body || {});

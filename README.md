@@ -10,9 +10,11 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 - Draft and publish lifecycle with version history and rollback
 - Robust execution engine with retries, timeouts, checkpoints, resume-from-failure
 - Manual approval nodes, run logs, run diff vs last success
+- Advanced control-flow nodes: conditional branch, loop iterate, parallel execute
 - Run diagnostics panel with failed-node summaries and screenshot/DOM artifact previews
 - Built-in workflow templates and local-time scheduling
 - Schedule presets and next-run preview before saving
+- Schedule dependency chains and maintenance windows
 - Local auth, role permissions, webhook events, rate limiting
 - Persistent audit logging with admin audit viewer/API
 - Local LLM data transform support via Ollama
@@ -100,6 +102,7 @@ docker compose logs -f
 - Workflows and runs: `/api/workflows*`, `/api/runs*`
 - Templates: `/api/templates`, `/api/workflows/from-template`
 - Schedules: `/api/schedules`, `/api/schedules/presets`, `/api/schedules/preview?cron=<expr>&timezone=<tz>`
+- Schedule calendar: `/api/schedules/upcoming?workflowId=<id>&days=14&limit=80&perSchedule=6`
 - Metrics: `/api/metrics/dashboard`
 - Runtime metrics: `/metrics` (Prometheus text format)
 - Secrets: `/api/secrets*`
