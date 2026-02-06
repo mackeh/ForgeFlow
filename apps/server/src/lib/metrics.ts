@@ -1,6 +1,8 @@
 type RunLike = {
   id: string;
   status: string;
+  workflowId?: string;
+  workflow?: { id?: string; name?: string } | null;
   createdAt: Date | string;
   startedAt?: Date | string | null;
   finishedAt?: Date | string | null;
@@ -82,6 +84,11 @@ export function buildDashboardMetrics(runs: RunLike[], timezone: string, days: n
   }
 
   const topNodeFailures = new Map<string, number>();
+  const workflowMap = new Map<
+    string,
+    { workflowId: string; workflowName: string; total: number; succeeded: number; failed: number; durations: number[] }
+  >();
+
   for (const run of inWindow) {
     const logs = Array.isArray(run.logs) ? (run.logs as Array<Record<string, unknown>>) : [];
     for (const log of logs) {
@@ -90,6 +97,27 @@ export function buildDashboardMetrics(runs: RunLike[], timezone: string, days: n
       if (!nodeId || nodeId === "run") continue;
       topNodeFailures.set(nodeId, (topNodeFailures.get(nodeId) || 0) + 1);
     }
+
+    const workflowId = String(run.workflowId || run.workflow?.id || "unknown");
+    const workflowName = String(run.workflow?.name || workflowId || "Unknown workflow");
+    const row =
+      workflowMap.get(workflowId) || {
+        workflowId,
+        workflowName,
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        durations: []
+      };
+    row.total += 1;
+    if (run.status === "SUCCEEDED") row.succeeded += 1;
+    if (run.status === "FAILED") row.failed += 1;
+    const startedAt = asDate(run.startedAt || null);
+    const finishedAt = asDate(run.finishedAt || null);
+    if (startedAt && finishedAt && finishedAt.getTime() >= startedAt.getTime()) {
+      row.durations.push(finishedAt.getTime() - startedAt.getTime());
+    }
+    workflowMap.set(workflowId, row);
   }
 
   const topFailures = Array.from(topNodeFailures.entries())
@@ -99,6 +127,22 @@ export function buildDashboardMetrics(runs: RunLike[], timezone: string, days: n
 
   const daily = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
   const hourly = Array.from(hourlyMap.values()).sort((a, b) => Number(a.hour) - Number(b.hour));
+  const topWorkflows = Array.from(workflowMap.values())
+    .map((item) => ({
+      workflowId: item.workflowId,
+      workflowName: item.workflowName,
+      total: item.total,
+      failed: item.failed,
+      successRate: item.total ? Number(((item.succeeded / item.total) * 100).toFixed(1)) : 0,
+      avgDurationMs: item.durations.length
+        ? Math.round(item.durations.reduce((sum, value) => sum + value, 0) / item.durations.length)
+        : 0
+    }))
+    .sort((a, b) => {
+      if (b.failed !== a.failed) return b.failed - a.failed;
+      return b.total - a.total;
+    })
+    .slice(0, 8);
 
   return {
     timezone,
@@ -115,6 +159,7 @@ export function buildDashboardMetrics(runs: RunLike[], timezone: string, days: n
     },
     daily,
     hourly,
-    topFailures
+    topFailures,
+    topWorkflows
   };
 }

@@ -4,8 +4,12 @@ import { getWorkflowTemplate, listWorkflowTemplates } from "./templates.js";
 
 test("listWorkflowTemplates exposes curated templates", () => {
   const templates = listWorkflowTemplates();
-  assert.equal(templates.length >= 3, true);
+  assert.equal(templates.length >= 7, true);
   assert.equal(templates.some((template) => template.id === "web-form-submit"), true);
+  assert.equal(templates.some((template) => template.id === "conditional-routing"), true);
+  const sample = templates.find((template) => template.id === "api-cleanup-sync");
+  assert.equal(typeof sample?.difficulty, "string");
+  assert.equal(Array.isArray(sample?.tags), true);
 });
 
 test("getWorkflowTemplate returns full definition for known template", () => {

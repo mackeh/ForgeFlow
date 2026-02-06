@@ -575,6 +575,7 @@ app.get("/api/metrics/dashboard", canReadMetrics, async (req, res) => {
 
   const runs = await prisma.run.findMany({
     where: { createdAt: { gte: since } },
+    include: { workflow: { select: { id: true, name: true } } },
     orderBy: { createdAt: "desc" },
     take: 2000
   });

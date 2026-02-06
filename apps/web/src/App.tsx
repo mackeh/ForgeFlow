@@ -112,6 +112,8 @@ export default function App() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateWorkflowName, setTemplateWorkflowName] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState("all");
   const [schedules, setSchedules] = useState<any[]>([]);
   const [scheduleName, setScheduleName] = useState("Daily Run");
   const [scheduleCron, setScheduleCron] = useState("0 9 * * *");
@@ -166,6 +168,35 @@ export default function App() {
       { label: "Desktop Wait Image", type: "desktop_wait_for_image" }
     ],
     []
+  );
+
+  const templateCategories = useMemo(() => {
+    const categories = Array.from(new Set((templates || []).map((template) => String(template.category || "other"))));
+    return ["all", ...categories.sort((a, b) => a.localeCompare(b))];
+  }, [templates]);
+
+  const filteredTemplates = useMemo(() => {
+    const search = templateSearch.trim().toLowerCase();
+    return (templates || []).filter((template) => {
+      const matchesCategory = templateCategoryFilter === "all" || template.category === templateCategoryFilter;
+      if (!matchesCategory) return false;
+      if (!search) return true;
+      const text = [
+        template.name,
+        template.description,
+        template.useCase,
+        ...(Array.isArray(template.tags) ? template.tags : [])
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return text.includes(search);
+    });
+  }, [templates, templateSearch, templateCategoryFilter]);
+
+  const selectedTemplate = useMemo(
+    () => (templates || []).find((template) => template.id === selectedTemplateId) || null,
+    [templates, selectedTemplateId]
   );
 
   useEffect(() => {
@@ -1129,14 +1160,41 @@ export default function App() {
           Logout
         </button>
         <h3>Templates</h3>
-        <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
-          <option value="">Select template</option>
-          {templates.map((template) => (
-            <option key={template.id} value={template.id}>
-              {template.name}
+        <input
+          value={templateSearch}
+          onChange={(e) => setTemplateSearch(e.target.value)}
+          placeholder="Search templates"
+        />
+        <select value={templateCategoryFilter} onChange={(e) => setTemplateCategoryFilter(e.target.value)}>
+          {templateCategories.map((category) => (
+            <option key={category} value={category}>
+              {category === "all" ? "All categories" : category}
             </option>
           ))}
         </select>
+        <div className="template-list">
+          {filteredTemplates.slice(0, 8).map((template) => (
+            <button
+              key={template.id}
+              className={selectedTemplateId === template.id ? "template-item selected" : "template-item"}
+              onClick={() => setSelectedTemplateId(template.id)}
+            >
+              <strong>{template.name}</strong>
+              <small>
+                {template.category} · {template.difficulty} · {template.nodes || 0} nodes
+              </small>
+            </button>
+          ))}
+          {!filteredTemplates.length ? <small>No templates match your filters.</small> : null}
+        </div>
+        {selectedTemplate ? (
+          <div className="template-preview">
+            <strong>{selectedTemplate.name}</strong>
+            <small>{selectedTemplate.description}</small>
+            <small>{selectedTemplate.useCase}</small>
+            <small>{Array.isArray(selectedTemplate.tags) ? selectedTemplate.tags.join(", ") : ""}</small>
+          </div>
+        ) : null}
         <input
           value={templateWorkflowName}
           onChange={(e) => setTemplateWorkflowName(e.target.value)}
@@ -1507,6 +1565,16 @@ export default function App() {
                 {dashboard.topFailures.slice(0, 4).map((item: any) => (
                   <small key={item.nodeId}>
                     {item.nodeId}: {item.count}
+                  </small>
+                ))}
+              </div>
+            ) : null}
+            {dashboard?.topWorkflows?.length ? (
+              <div className="top-failures">
+                <strong>Top Workflow Risk</strong>
+                {dashboard.topWorkflows.slice(0, 4).map((item: any) => (
+                  <small key={item.workflowId}>
+                    {item.workflowName}: {item.failed} failed, {item.successRate}% success
                   </small>
                 ))}
               </div>
