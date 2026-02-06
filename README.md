@@ -16,7 +16,7 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 1. Copy env and set credentials
    - `cp .env.example .env`
 2. Start everything
-   - `docker compose up --build`
+   - `docker compose up --build --renew-anon-volumes`
 3. Open UI
    - `http://localhost:5173`
 

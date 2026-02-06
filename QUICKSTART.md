@@ -154,6 +154,12 @@ Stop all services:
 docker compose down
 ```
 
+If dependencies changed and a service still fails with `module not found`, recreate anonymous volumes:
+
+```bash
+docker compose up --build --renew-anon-volumes
+```
+
 View logs:
 
 ```bash

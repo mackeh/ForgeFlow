@@ -43,4 +43,4 @@ docker compose up -d db redis
 docker compose run --rm --no-deps server npm run prisma:migrate
 
 echo "Starting ForgeFlow..."
-docker compose up --build
+docker compose up --build --renew-anon-volumes
