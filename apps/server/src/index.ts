@@ -52,6 +52,7 @@ import {
 } from "./lib/webhookStore.js";
 import { dispatchWebhookTest } from "./lib/webhooks.js";
 import { collectHealth } from "./lib/health.js";
+import { appendAuditEvent, listAuditEvents } from "./lib/auditStore.js";
 
 const app = express();
 const server = createServer(app);
@@ -136,16 +137,39 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
   const schema = z.object({ username: z.string(), password: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
+    await appendAuditEvent({
+      actorUsername: "anonymous",
+      actorRole: "anonymous",
+      action: "auth.login",
+      resourceType: "auth",
+      success: false,
+      message: "Invalid login payload"
+    });
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
   const { username, password } = parsed.data;
   const authUser = await verifyLogin(username, password);
   if (!authUser) {
+    await appendAuditEvent({
+      actorUsername: username,
+      actorRole: "unknown",
+      action: "auth.login",
+      resourceType: "auth",
+      success: false,
+      message: "Invalid credentials or temporarily locked account"
+    });
     res.status(401).json({ error: "Invalid credentials or temporarily locked account" });
     return;
   }
   const token = signToken({ username: authUser.username, role: authUser.role });
+  await appendAuditEvent({
+    actorUsername: authUser.username,
+    actorRole: authUser.role,
+    action: "auth.login",
+    resourceType: "auth",
+    success: true
+  });
   res.json({ token, user: authUser });
 });
 
@@ -172,6 +196,37 @@ const canWriteSecrets = requirePermission("secrets:write");
 const canManageUsers = requirePermission("users:manage");
 const canManageRoles = requirePermission("roles:manage");
 const canManageWebhooks = requirePermission("webhooks:manage");
+const canReadAudit = requirePermission("audit:read");
+
+function toOptionalBoolean(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+async function writeAuditEvent(
+  req: express.Request,
+  payload: {
+    action: string;
+    resourceType: string;
+    resourceId?: string;
+    success?: boolean;
+    message?: string;
+    metadata?: unknown;
+  }
+) {
+  try {
+    const auth = getAuthContext(req);
+    await appendAuditEvent({
+      actorUsername: auth?.username || "system",
+      actorRole: auth?.role || "system",
+      ...payload
+    });
+  } catch (error) {
+    console.error("[audit] failed to write audit event", error);
+  }
+}
 
 app.get("/api/system/time", (_req, res) => {
   const timezone = defaultScheduleTimezone();
@@ -216,6 +271,15 @@ app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => 
     }
   });
   await saveDraftWorkflow(prisma, workflow.id, template.definition, `Created from template ${template.id}`);
+  await writeAuditEvent(req, {
+    action: "workflow.create_from_template",
+    resourceType: "workflow",
+    resourceId: workflow.id,
+    metadata: {
+      templateId: template.id,
+      name: workflow.name
+    }
+  });
   res.json(workflow);
 });
 
@@ -249,6 +313,12 @@ app.post("/api/workflows", canWriteWorkflows, async (req, res) => {
     }
   });
   await saveDraftWorkflow(prisma, workflow.id, initialDefinition, "Initial draft");
+  await writeAuditEvent(req, {
+    action: "workflow.create",
+    resourceType: "workflow",
+    resourceId: workflow.id,
+    metadata: { name: workflow.name }
+  });
   res.json(workflow);
 });
 
@@ -273,8 +343,24 @@ app.put("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
     } else {
       workflow = await prisma.workflow.update({ where: { id: req.params.id }, data: payload });
     }
+    await writeAuditEvent(req, {
+      action: "workflow.update",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      metadata: {
+        renamed: Boolean(parsed.data.name),
+        definitionUpdated: parsed.data.definition !== undefined
+      }
+    });
     res.json(workflow);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "workflow.update",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -288,8 +374,23 @@ app.post("/api/workflows/:id/publish", canWriteWorkflows, async (req, res) => {
   }
   try {
     const published = await publishWorkflow(prisma, req.params.id, parsed.data.notes);
+    await writeAuditEvent(req, {
+      action: "workflow.publish",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      metadata: {
+        version: published.publishedVersion
+      }
+    });
     res.json(published);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "workflow.publish",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -311,8 +412,23 @@ app.post("/api/workflows/:id/rollback", canWriteWorkflows, async (req, res) => {
   }
   try {
     const rolled = await rollbackWorkflow(prisma, req.params.id, parsed.data.version);
+    await writeAuditEvent(req, {
+      action: "workflow.rollback",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      metadata: {
+        version: parsed.data.version
+      }
+    });
     res.json(rolled);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "workflow.rollback",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -322,8 +438,20 @@ app.delete("/api/workflows/:id", canWriteWorkflows, async (req, res) => {
     await deleteSchedulesForWorkflow(req.params.id);
     await deleteWorkflow(prisma, req.params.id);
     await scheduler.refresh();
+    await writeAuditEvent(req, {
+      action: "workflow.delete",
+      resourceType: "workflow",
+      resourceId: req.params.id
+    });
     res.json({ ok: true });
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "workflow.delete",
+      resourceType: "workflow",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
     res.status(404).json({ error: String(error) });
   }
 });
@@ -382,11 +510,27 @@ app.post("/api/schedules", canManageSchedules, async (req, res) => {
       timezone: normalizeScheduleTimezone(parsed.data.timezone)
     });
     await scheduler.refresh();
+    await writeAuditEvent(req, {
+      action: "schedule.create",
+      resourceType: "schedule",
+      resourceId: schedule.id,
+      metadata: {
+        workflowId: schedule.workflowId,
+        cron: schedule.cron,
+        timezone: schedule.timezone
+      }
+    });
     res.json({
       ...schedule,
       ...buildSchedulePreview(schedule.cron, schedule.timezone)
     });
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "schedule.create",
+      resourceType: "schedule",
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -408,11 +552,24 @@ app.put("/api/schedules/:id", canManageSchedules, async (req, res) => {
   try {
     const schedule = await updateSchedule(req.params.id, parsed.data);
     await scheduler.refresh();
+    await writeAuditEvent(req, {
+      action: "schedule.update",
+      resourceType: "schedule",
+      resourceId: schedule.id,
+      metadata: parsed.data
+    });
     res.json({
       ...schedule,
       ...buildSchedulePreview(schedule.cron, schedule.timezone)
     });
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "schedule.update",
+      resourceType: "schedule",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
     res.status(404).json({ error: String(error) });
   }
 });
@@ -421,9 +578,21 @@ app.delete("/api/schedules/:id", canManageSchedules, async (req, res) => {
   const removed = await deleteSchedule(req.params.id);
   await scheduler.refresh();
   if (!removed) {
+    await writeAuditEvent(req, {
+      action: "schedule.delete",
+      resourceType: "schedule",
+      resourceId: req.params.id,
+      success: false,
+      message: "Schedule not found"
+    });
     res.status(404).json({ error: "Schedule not found" });
     return;
   }
+  await writeAuditEvent(req, {
+    action: "schedule.delete",
+    resourceType: "schedule",
+    resourceId: req.params.id
+  });
   res.json({ ok: true });
 });
 
@@ -434,6 +603,12 @@ app.post("/api/schedules/:id/run-now", canManageSchedules, async (req, res) => {
     return;
   }
   const executed = await scheduler.runNow(req.params.id);
+  await writeAuditEvent(req, {
+    action: "schedule.run_now",
+    resourceType: "schedule",
+    resourceId: req.params.id,
+    metadata: { executed }
+  });
   res.json({ ok: true, executed });
 });
 
@@ -484,8 +659,28 @@ app.post("/api/runs/start", canExecuteWorkflows, async (req, res) => {
       console.error("Run failed", err);
     });
 
+    await writeAuditEvent(req, {
+      action: "run.start",
+      resourceType: "run",
+      resourceId: run.id,
+      metadata: {
+        workflowId: parsed.data.workflowId,
+        testMode,
+        resumeFromRunId: parsed.data.resumeFromRunId || null
+      }
+    });
     res.json(run);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "run.start",
+      resourceType: "run",
+      success: false,
+      message: String(error),
+      metadata: {
+        workflowId: parsed.data.workflowId,
+        testMode: Boolean(parsed.data.testMode)
+      }
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -567,6 +762,15 @@ app.post("/api/runs/:id/approve", canApproveWorkflows, async (req, res) => {
     startRun(prisma, run.id).catch((err) => console.error("Resume failed", err));
   }
 
+  await writeAuditEvent(req, {
+    action: "run.approval",
+    resourceType: "run",
+    resourceId: run.id,
+    metadata: {
+      nodeId: parsed.data.nodeId,
+      approved: parsed.data.approved
+    }
+  });
   res.json({ ok: true });
 });
 
@@ -638,8 +842,24 @@ app.post("/api/admin/users", canManageUsers, async (req, res) => {
   }
   try {
     const user = await createUser(parsed.data);
+    await writeAuditEvent(req, {
+      action: "user.create",
+      resourceType: "user",
+      resourceId: user.username,
+      metadata: {
+        role: user.role,
+        disabled: user.disabled
+      }
+    });
     res.json(user);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "user.create",
+      resourceType: "user",
+      resourceId: parsed.data.username,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -657,8 +877,25 @@ app.put("/api/admin/users/:username", canManageUsers, async (req, res) => {
   }
   try {
     const user = await updateUser(req.params.username, parsed.data);
+    await writeAuditEvent(req, {
+      action: "user.update",
+      resourceType: "user",
+      resourceId: user.username,
+      metadata: {
+        role: user.role,
+        disabled: user.disabled,
+        passwordUpdated: Boolean(parsed.data.password)
+      }
+    });
     res.json(user);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "user.update",
+      resourceType: "user",
+      resourceId: req.params.username,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -667,11 +904,30 @@ app.delete("/api/admin/users/:username", canManageUsers, async (req, res) => {
   try {
     const removed = await deleteUser(req.params.username);
     if (!removed) {
+      await writeAuditEvent(req, {
+        action: "user.delete",
+        resourceType: "user",
+        resourceId: req.params.username,
+        success: false,
+        message: "User not found"
+      });
       res.status(404).json({ error: "User not found" });
       return;
     }
+    await writeAuditEvent(req, {
+      action: "user.delete",
+      resourceType: "user",
+      resourceId: req.params.username
+    });
     res.json({ ok: true });
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "user.delete",
+      resourceType: "user",
+      resourceId: req.params.username,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -692,10 +948,42 @@ app.put("/api/admin/roles/:role", canManageRoles, async (req, res) => {
   }
   try {
     const role = await upsertRolePermissions(req.params.role, parsed.data.permissions);
+    await writeAuditEvent(req, {
+      action: "role.update",
+      resourceType: "role",
+      resourceId: role.role,
+      metadata: {
+        permissions: role.permissions
+      }
+    });
     res.json(role);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "role.update",
+      resourceType: "role",
+      resourceId: req.params.role,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
+});
+
+app.get("/api/admin/audit", canReadAudit, async (req, res) => {
+  const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 100;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 100;
+  const actorUsername = typeof req.query.actorUsername === "string" ? req.query.actorUsername : undefined;
+  const action = typeof req.query.action === "string" ? req.query.action : undefined;
+  const resourceType = typeof req.query.resourceType === "string" ? req.query.resourceType : undefined;
+  const success = toOptionalBoolean(req.query.success);
+  const events = await listAuditEvents({
+    limit,
+    actorUsername,
+    action,
+    resourceType,
+    success
+  });
+  res.json(events);
 });
 
 app.get("/api/webhooks/events", canManageWebhooks, (_req, res) => {
@@ -723,8 +1011,23 @@ app.post("/api/webhooks", canManageWebhooks, async (req, res) => {
   }
   try {
     const hook = await createWebhook(parsed.data);
+    await writeAuditEvent(req, {
+      action: "webhook.create",
+      resourceType: "webhook",
+      resourceId: hook.id,
+      metadata: {
+        name: hook.name,
+        events: hook.events
+      }
+    });
     res.json(hook);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "webhook.create",
+      resourceType: "webhook",
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -745,8 +1048,21 @@ app.put("/api/webhooks/:id", canManageWebhooks, async (req, res) => {
   }
   try {
     const hook = await updateWebhook(req.params.id, parsed.data);
+    await writeAuditEvent(req, {
+      action: "webhook.update",
+      resourceType: "webhook",
+      resourceId: hook.id,
+      metadata: parsed.data
+    });
     res.json(hook);
   } catch (error) {
+    await writeAuditEvent(req, {
+      action: "webhook.update",
+      resourceType: "webhook",
+      resourceId: req.params.id,
+      success: false,
+      message: String(error)
+    });
     res.status(400).json({ error: String(error) });
   }
 });
@@ -754,9 +1070,21 @@ app.put("/api/webhooks/:id", canManageWebhooks, async (req, res) => {
 app.delete("/api/webhooks/:id", canManageWebhooks, async (req, res) => {
   const removed = await deleteWebhook(req.params.id);
   if (!removed) {
+    await writeAuditEvent(req, {
+      action: "webhook.delete",
+      resourceType: "webhook",
+      resourceId: req.params.id,
+      success: false,
+      message: "Webhook not found"
+    });
     res.status(404).json({ error: "Webhook not found" });
     return;
   }
+  await writeAuditEvent(req, {
+    action: "webhook.delete",
+    resourceType: "webhook",
+    resourceId: req.params.id
+  });
   res.json({ ok: true });
 });
 
@@ -769,6 +1097,12 @@ app.post("/api/webhooks/:id/test", canManageWebhooks, async (req, res) => {
   const result = await dispatchWebhookTest(hook.id, {
     webhookId: hook.id,
     name: hook.name
+  });
+  await writeAuditEvent(req, {
+    action: "webhook.test",
+    resourceType: "webhook",
+    resourceId: hook.id,
+    metadata: result
   });
   res.json({ ok: true, ...result });
 });
@@ -787,9 +1121,27 @@ app.post("/api/secrets", canWriteSecrets, async (req, res) => {
   }
   try {
     await upsertSecret(prisma, parsed.data.key, parsed.data.value);
+    await writeAuditEvent(req, {
+      action: "secret.upsert",
+      resourceType: "secret",
+      resourceId: parsed.data.key,
+      metadata: {
+        key: parsed.data.key
+      }
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error(`[SECRETS] Error upserting secret:`, err);
+    await writeAuditEvent(req, {
+      action: "secret.upsert",
+      resourceType: "secret",
+      resourceId: parsed.data.key,
+      success: false,
+      message: String(err),
+      metadata: {
+        key: parsed.data.key
+      }
+    });
     res.status(500).json({ error: String(err) });
   }
 });

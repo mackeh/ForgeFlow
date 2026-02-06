@@ -247,6 +247,23 @@ export function getRoles() {
   return request("/api/admin/roles");
 }
 
+export function getAuditEvents(params?: {
+  limit?: number;
+  actorUsername?: string;
+  action?: string;
+  resourceType?: string;
+  success?: boolean;
+}) {
+  const q = new URLSearchParams();
+  if (params?.limit !== undefined) q.set("limit", String(params.limit));
+  if (params?.actorUsername) q.set("actorUsername", params.actorUsername);
+  if (params?.action) q.set("action", params.action);
+  if (params?.resourceType) q.set("resourceType", params.resourceType);
+  if (params?.success !== undefined) q.set("success", String(params.success));
+  const query = q.toString();
+  return request(`/api/admin/audit${query ? `?${query}` : ""}`);
+}
+
 export function updateRole(role: string, permissions: string[]) {
   return request(`/api/admin/roles/${encodeURIComponent(role)}`, {
     method: "PUT",

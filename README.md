@@ -13,7 +13,13 @@ ForgeFlow is a **highly sophisticated, production-ready RPA platform** with exce
 - Built-in workflow templates and local-time scheduling
 - Schedule presets and next-run preview before saving
 - Local auth, role permissions, webhook events, rate limiting
+- Persistent audit logging with admin audit viewer/API
 - Local LLM data transform support via Ollama
+
+## Recent Updates
+- Added persistent audit logging with retention controls (`AUDIT_FILE`, `AUDIT_MAX_EVENTS`)
+- Added schedule presets and local-time next-run preview
+- Added admin audit endpoint and sidebar audit log viewer
 
 ## Services
 - `web` UI: `http://localhost:5173`
@@ -52,6 +58,7 @@ Primary variables in `.env`:
 - `TRUST_PROXY`
 - `SELECTOR_AI_ENABLED`, `SELECTOR_AI_MODEL`
 - `AUTHZ_FILE`, `WEBHOOKS_FILE`, `SCHEDULES_FILE`, `SCHEDULE_DEFAULT_TIMEZONE`
+- `AUDIT_FILE`, `AUDIT_MAX_EVENTS`
 
 ## Common Commands
 Start stack:
@@ -88,11 +95,12 @@ docker compose logs -f
 - Auth: `/api/auth/*`
 - Workflows and runs: `/api/workflows*`, `/api/runs*`
 - Templates: `/api/templates`, `/api/workflows/from-template`
-- Schedules: `/api/schedules*` (includes presets and next-run preview)
+- Schedules: `/api/schedules`, `/api/schedules/presets`, `/api/schedules/preview?cron=<expr>&timezone=<tz>`
 - Metrics: `/api/metrics/dashboard`
 - Secrets: `/api/secrets*`
 - Recorders: `/api/recorders/web/start`, `/api/recorders/desktop/start`, `/api/recorders/desktop/stop`
 - Admin/RBAC: `/api/admin/users*`, `/api/admin/roles*`
+- Audit: `/api/admin/audit?limit=100&actorUsername=<user>&action=<prefix>&resourceType=<type>&success=true|false`
 - Webhooks: `/api/webhooks*`
 
 ## Troubleshooting

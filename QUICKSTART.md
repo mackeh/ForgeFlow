@@ -30,7 +30,15 @@ Default values:
 - Username: `local`
 - Password: `localpass`
 
-## 3. Create your first workflow
+## 3. Verify readiness (recommended)
+
+```bash
+curl -sS http://localhost:8080/ready
+```
+
+Expected: `"ready": true`
+
+## 4. Create your first workflow
 
 1. Click `New` in the left sidebar.
 2. Add nodes from the top toolbar.
@@ -50,7 +58,7 @@ Tips:
 - Use `Snap: On/Off` depending on precision vs free placement.
 - Use `Ctrl+S` save, `Ctrl+T` test run, `Ctrl+R` run.
 
-## 4. Run lifecycle (test, publish, production)
+## 5. Run lifecycle (test, publish, production)
 
 1. `Save Draft`
 2. `Test Run` (runs draft definition)
@@ -64,7 +72,7 @@ If a run fails:
 If a run pauses at `manual_approval`:
 - Click `Approve Waiting Node` in run controls.
 
-## 5. Use recording
+## 6. Use recording
 
 ### Web recording
 1. Click `Record Web`.
@@ -83,13 +91,19 @@ xhost +local:
 ```
 - Ensure `.env` has correct `DISPLAY` (usually `:0`).
 
-## 6. Use templates
+## 7. Import or export workflow files
+
+In the left sidebar (`Workflow` section):
+- `Save Workflow File` exports current workflow JSON
+- `Load Workflow File` imports a workflow JSON as a new workflow
+
+## 8. Use templates
 
 1. Open `Templates` in the left panel.
 2. Search or filter by category.
 3. Select a template and click `Create From Template`.
 
-## 7. Configure schedules (local time)
+## 9. Configure schedules (local time)
 
 1. Open `Schedules` section.
 2. Choose a preset, click `Use Preset`, or type your own cron.
@@ -103,7 +117,7 @@ Schedule management:
 - `Delete`
 - Card shows last run time/status/error
 
-## 8. Secrets and LLM transforms
+## 10. Secrets and LLM transforms
 
 Add secrets:
 1. Enter key/value in `Secrets` panel.
@@ -123,12 +137,13 @@ Pull model once:
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
 
-## 9. Admin features
+## 11. Admin features
 
 For admin users:
 - Manage users (create/disable/delete)
 - Update role permissions
 - Manage webhook subscriptions
+- Review audit log events in the sidebar (`Audit Log`)
 
 Common webhook events:
 - `run.started`
@@ -136,7 +151,13 @@ Common webhook events:
 - `run.failed`
 - `run.waiting_approval`
 
-## 10. Useful commands
+Audit API example:
+```bash
+curl -sS "http://localhost:8080/api/admin/audit?limit=20" \
+  -H "Authorization: Bearer <token>"
+```
+
+## 12. Useful commands
 
 Start without auto-update:
 
@@ -168,7 +189,7 @@ Rebuild clean container node modules (fix module errors):
 docker compose up --build --renew-anon-volumes
 ```
 
-## 11. Troubleshooting
+## 13. Troubleshooting
 
 Login fails:
 - Verify `APP_USERNAME` and `APP_PASSWORD` in `.env`.

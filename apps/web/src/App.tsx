@@ -25,6 +25,7 @@ import {
   deleteWebhook,
   getDashboardMetrics,
   getAdminUsers,
+  getAuditEvents,
   getCurrentUser,
   deleteWorkflow,
   getRoles,
@@ -87,6 +88,17 @@ type SchedulePreview = {
   timezone: string;
   cron: string;
 };
+type AuditEvent = {
+  id: string;
+  at: string;
+  actorUsername: string;
+  actorRole: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string;
+  success: boolean;
+  message?: string;
+};
 
 const defaultDefinition = {
   nodes: [
@@ -142,6 +154,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [newUserName, setNewUserName] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState("operator");
@@ -505,16 +518,18 @@ export default function App() {
   }
 
   async function refreshAdmin() {
-    const [userList, roleList, hooks, events] = await Promise.all([
+    const [userList, roleList, hooks, events, audit] = await Promise.all([
       getAdminUsers(),
       getRoles(),
       getWebhooks(),
-      getWebhookEvents()
+      getWebhookEvents(),
+      getAuditEvents({ limit: 40 }).catch(() => [])
     ]);
     setAdminUsers(userList || []);
     setRoles(roleList || []);
     setWebhookList(hooks || []);
     setWebhookEvents(events || []);
+    setAuditEvents(Array.isArray(audit) ? audit : []);
     if (Array.isArray(events) && events.length && webhookEventSelection.length === 0) {
       setWebhookEventSelection([events[0]]);
     }
@@ -611,6 +626,7 @@ export default function App() {
     setCurrentUser(null);
     setAdminUsers([]);
     setRoles([]);
+    setAuditEvents([]);
     setWebhookList([]);
     setWebhookEvents([]);
     setNodes(defaultDefinition.nodes as Node[]);
@@ -1028,6 +1044,12 @@ export default function App() {
     setFeedback("Viewer role updated", "success");
   };
 
+  const handleRefreshAudit = async () => {
+    const events = await getAuditEvents({ limit: 40 });
+    setAuditEvents(Array.isArray(events) ? events : []);
+    setFeedback("Audit log refreshed", "info");
+  };
+
   const handleRenameWorkflow = async () => {
     if (!activeWorkflow || !workflowName.trim()) return;
     const updated = await updateWorkflow(activeWorkflow.id, { name: workflowName.trim() });
@@ -1177,6 +1199,7 @@ export default function App() {
   const canManageUsers = isAdminUser || currentPermissions.includes("users:manage");
   const canManageRoles = isAdminUser || currentPermissions.includes("roles:manage");
   const canManageWebhooks = isAdminUser || currentPermissions.includes("webhooks:manage");
+  const canReadAudit = isAdminUser || currentPermissions.includes("audit:read");
   const availableRoleNames = roles.map((entry) => entry.role);
 
   if (!token) {
@@ -1453,6 +1476,32 @@ export default function App() {
                   </div>
                 </div>
               ))}
+            </div>
+          </>
+        ) : null}
+        {canReadAudit ? (
+          <>
+            <h3>Audit Log</h3>
+            <button onClick={() => handleRefreshAudit().catch(showError)}>Refresh Audit</button>
+            <div className="schedule-list">
+              {auditEvents.slice(0, 20).map((event) => (
+                <div key={event.id} className="schedule-item">
+                  <div>
+                    <strong>
+                      {event.success ? "OK" : "FAILED"} · {event.action}
+                    </strong>
+                    <small>
+                      {new Date(event.at).toLocaleString()} · {event.actorUsername} ({event.actorRole})
+                    </small>
+                    <small>
+                      {event.resourceType}
+                      {event.resourceId ? `/${event.resourceId}` : ""}
+                    </small>
+                    {event.message ? <small>{event.message}</small> : null}
+                  </div>
+                </div>
+              ))}
+              {!auditEvents.length ? <small>No audit events yet.</small> : null}
             </div>
           </>
         ) : null}
