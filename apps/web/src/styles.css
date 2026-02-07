@@ -38,6 +38,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -97,12 +98,15 @@ button.is-loading {
 }
 
 .sidebar-extra {
-  margin-top: auto;
+  margin-top: 0;
   border-top: 1px solid var(--border);
   padding-top: 12px;
+  padding-right: 4px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  overflow: auto;
 }
 
 .sidebar-extra input,
@@ -299,6 +303,27 @@ button.is-loading {
   border-radius: 999px;
   padding: 4px 8px;
   font-size: 11px;
+}
+
+.sidebar-extra .chip {
+  background: rgba(44, 185, 176, 0.18);
+  border: 1px solid rgba(44, 185, 176, 0.5);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.sidebar-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 2px;
+}
+
+.sidebar-extra h3,
+.sidebar-extra h4 {
+  scroll-margin-top: 10px;
 }
 
 .sidebar-extra small {

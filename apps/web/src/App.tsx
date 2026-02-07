@@ -7,6 +7,7 @@ import ReactFlow, {
   Connection,
   Edge,
   Node,
+  ReactFlowInstance,
   useNodesState,
   useEdgesState
 } from "reactflow";
@@ -307,6 +308,8 @@ export default function App() {
   const [twoFactorToken, setTwoFactorToken] = useState("");
 
   const nodesRef = useRef<Node[]>(nodes);
+  const edgesRef = useRef<Edge[]>(edges);
+  const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const toastIdRef = useRef(1);
   const logIdRef = useRef(1);
@@ -316,6 +319,10 @@ export default function App() {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   const nodeOptions = useMemo(
     () => [
@@ -1158,20 +1165,43 @@ export default function App() {
     setFeedback("Auto layout complete", "success");
   };
 
+  const resolveFreeNodePosition = (candidate: { x: number; y: number }, existingNodes: Node[]) => {
+    const minXDistance = 80;
+    const minYDistance = 60;
+    const stepY = 110;
+    const next = { ...candidate };
+    let guard = 0;
+    while (
+      existingNodes.some(
+        (node) =>
+          Math.abs((node.position?.x ?? 0) - next.x) < minXDistance &&
+          Math.abs((node.position?.y ?? 0) - next.y) < minYDistance
+      ) &&
+      guard < 24
+    ) {
+      next.y += stepY;
+      guard += 1;
+    }
+    return next;
+  };
+
   const handleAddNode = (type: string, dataOverrides: Record<string, unknown> = {}): string => {
     const id = `${type}-${Date.now()}`;
     const lastNode = nodesRef.current[nodesRef.current.length - 1];
     const sourceNode = selectedNode || lastNode || null;
     const sourcePosition = sourceNode?.position || findNextNodePosition(nodesRef.current);
+    const siblingCount = sourceNode ? edgesRef.current.filter((edge) => edge.source === sourceNode.id).length : 0;
+    const basePosition = sourceNode
+      ? {
+          x: sourcePosition.x + 250,
+          y: sourcePosition.y + siblingCount * 110
+        }
+      : findNextNodePosition(nodesRef.current);
+    const position = resolveFreeNodePosition(basePosition, nodesRef.current);
     const newNode: Node = {
       id,
       type: "action",
-      position: sourceNode
-        ? {
-            x: sourcePosition.x + 250,
-            y: sourcePosition.y
-          }
-        : findNextNodePosition(nodesRef.current),
+      position,
       data: { label: type.replace(/_/g, " "), type, ...dataOverrides }
     };
     nodesRef.current = [...nodesRef.current, newNode];
@@ -1181,6 +1211,10 @@ export default function App() {
     if (sourceNode) {
       setEdges((eds) => [...eds, { id: `e-${sourceNode.id}-${id}`, source: sourceNode.id, target: id }]);
     }
+
+    window.setTimeout(() => {
+      reactFlowRef.current?.setCenter(position.x + 100, position.y + 24, { duration: 220, zoom: 1.05 });
+    }, 0);
 
     setStatus(`Added node: ${newNode.data?.label || type}`);
     return id;
@@ -1333,10 +1367,24 @@ export default function App() {
     setFeedback("Starting recorder...", "info");
     const session = await startRecorder();
     const ws = new WebSocket(`${API_URL.replace("http", "ws")}${session.wsUrl}`);
+    let isReady = false;
+    let capturedEvents = 0;
+    const readyTimeout = window.setTimeout(() => {
+      if (isReady) return;
+      setFeedback("Recorder did not connect in time. Check browser/Playwright availability.", "error");
+      ws.close();
+    }, 6000);
 
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
+      if (message.type === "recorder:ready") {
+        isReady = true;
+        window.clearTimeout(readyTimeout);
+        setFeedback("Recorder connected. Perform actions in the recording browser.", "success");
+        return;
+      }
       if (message.type === "recorder:event") {
+        capturedEvents += 1;
         const payload = message.payload;
         if (payload.type === "click") {
           handleAddNode("playwright_click", { selector: payload.selector, retryCount: 2, timeoutMs: 15000 });
@@ -1352,8 +1400,18 @@ export default function App() {
       }
     };
 
-    ws.onopen = () => setFeedback("Recorder connected", "success");
-    ws.onerror = () => setFeedback("Recorder error", "error");
+    ws.onopen = () => setFeedback("Recorder socket opened. Waiting for recorder ready signal...", "info");
+    ws.onerror = () => {
+      window.clearTimeout(readyTimeout);
+      setFeedback("Recorder error. Unable to stream events.", "error");
+    };
+    ws.onclose = () => {
+      window.clearTimeout(readyTimeout);
+      if (!isReady) return;
+      if (!capturedEvents) {
+        setFeedback("Recorder session ended with no captured actions.", "info");
+      }
+    };
   };
 
   const handleDesktopRecordStart = async () => {
@@ -1842,6 +1900,19 @@ export default function App() {
   const canManageWebhooks = isAdminUser || currentPermissions.includes("webhooks:manage");
   const canReadAudit = isAdminUser || currentPermissions.includes("audit:read");
   const availableRoleNames = roles.map((entry) => entry.role);
+  const sidebarShortcuts = [
+    { id: "workflow", label: "Workflow" },
+    { id: "templates", label: "Templates" },
+    { id: "integrations", label: "Integrations" },
+    { id: "schedules", label: "Schedules" },
+    { id: "security", label: "Security" },
+    { id: "secrets", label: "Secrets" }
+  ];
+
+  const scrollSidebarSection = (id: string) => {
+    const element = document.getElementById(`sidebar-${id}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   if (!token) {
     return (
@@ -1894,7 +1965,14 @@ export default function App() {
         <small>
           User: <strong>{currentUser?.username || "-"}</strong> ({currentUser?.role || "unknown"})
         </small>
-        <h3>Workflow</h3>
+        <div className="sidebar-jump">
+          {sidebarShortcuts.map((item) => (
+            <button key={item.id} className="chip" onClick={() => scrollSidebarSection(item.id)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <h3 id="sidebar-workflow">Workflow</h3>
         <input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="Workflow name" />
         <button onClick={() => handleRenameWorkflow().catch(showError)}>Rename</button>
         <button onClick={handleSaveWorkflowFile}>Save Workflow File</button>
@@ -1905,7 +1983,7 @@ export default function App() {
         <button className="secondary" onClick={handleLogout}>
           Logout
         </button>
-        <h3>Security</h3>
+        <h3 id="sidebar-security">Security</h3>
         <small>
           2FA:{" "}
           {twoFactorStatus?.enabled ? "Enabled" : twoFactorStatus?.pending ? "Pending verification" : "Disabled"}
@@ -1930,7 +2008,7 @@ export default function App() {
             Disable 2FA
           </button>
         ) : null}
-        <h3>Collaboration</h3>
+        <h3 id="sidebar-collaboration">Collaboration</h3>
         <small>Live presence</small>
         <div className="collab-presence">
           {collabPresence.length ? (
@@ -1981,7 +2059,7 @@ export default function App() {
           ))}
           {!workflowHistory?.events?.length ? <small>No history yet</small> : null}
         </div>
-        <h3>Templates</h3>
+        <h3 id="sidebar-templates">Templates</h3>
         <input
           value={templateSearch}
           onChange={(e) => setTemplateSearch(e.target.value)}
@@ -2029,7 +2107,7 @@ export default function App() {
         >
           {isActionLoading("create-template") ? "Creating..." : "Create From Template"}
         </button>
-        <h3>Integrations</h3>
+        <h3 id="sidebar-integrations">Integrations</h3>
         <input
           value={integrationName}
           onChange={(e) => setIntegrationName(e.target.value)}
@@ -2081,7 +2159,7 @@ export default function App() {
           placeholder="CSV file path (optional)"
         />
         <button onClick={() => handleImportCsvPreview().catch(showError)}>Parse CSV + Add Node</button>
-        <h3>Schedules</h3>
+        <h3 id="sidebar-schedules">Schedules</h3>
         <div className="schedule-preset-row">
           <select value={selectedSchedulePreset} onChange={(e) => setSelectedSchedulePreset(e.target.value)}>
             <option value="">Select preset</option>
@@ -2189,7 +2267,7 @@ export default function App() {
         </div>
         {canManageUsers ? (
           <>
-            <h3>Users</h3>
+            <h3 id="sidebar-users">Users</h3>
             <input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} placeholder="Username" />
             <input
               value={newUserPassword}
@@ -2230,13 +2308,13 @@ export default function App() {
         ) : null}
         {canManageRoles ? (
           <>
-            <h3>RBAC</h3>
+            <h3 id="sidebar-rbac">RBAC</h3>
             <button onClick={() => handleEnableViewerReadOnly().catch(showError)}>Apply Viewer Read-Only Preset</button>
           </>
         ) : null}
         {canManageWebhooks ? (
           <>
-            <h3>Webhooks</h3>
+            <h3 id="sidebar-webhooks">Webhooks</h3>
             <input value={webhookName} onChange={(e) => setWebhookName(e.target.value)} placeholder="Webhook name" />
             <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="https://..." />
             <input
@@ -2302,7 +2380,7 @@ export default function App() {
         ) : null}
         {canReadAudit ? (
           <>
-            <h3>Audit Log</h3>
+            <h3 id="sidebar-audit">Audit Log</h3>
             <button onClick={() => handleRefreshAudit().catch(showError)}>Refresh Audit</button>
             <div className="schedule-list">
               {auditEvents.slice(0, 20).map((event) => (
@@ -2326,7 +2404,7 @@ export default function App() {
             </div>
           </>
         ) : null}
-        <h3>Versions</h3>
+        <h3 id="sidebar-versions">Versions</h3>
         <select
           value={rollbackVersion}
           onChange={(e) => setRollbackVersion(e.target.value ? Number(e.target.value) : "")}
@@ -2339,7 +2417,7 @@ export default function App() {
           ))}
         </select>
         <button onClick={() => handleRollback().catch(showError)}>Rollback</button>
-        <h3>Secrets</h3>
+        <h3 id="sidebar-secrets">Secrets</h3>
         <input placeholder="Secret key" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} />
         <input
           placeholder="Secret value"
@@ -2541,6 +2619,9 @@ export default function App() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={(_, node) => setSelectedNode(node)}
+          onInit={(instance) => {
+            reactFlowRef.current = instance;
+          }}
           nodeTypes={nodeTypes}
           snapToGrid={snapToGrid}
           snapGrid={[20, 20]}
