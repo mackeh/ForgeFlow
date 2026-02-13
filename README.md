@@ -1,5 +1,7 @@
 # ForgeFlow
 
+[![CI](https://github.com/mackeh/ForgeFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/mackeh/ForgeFlow/actions/workflows/ci.yml)
+
 ForgeFlow is a local-first automation platform for web and desktop workflows.
 
 It combines a drag-and-drop workflow studio, resilient execution, AI-assisted automation, and centralized operations in one stack.

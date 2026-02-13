@@ -99,6 +99,10 @@ When adding features:
 - Add API behavior tests for validation/permission edges where feasible.
 - For run-engine features, include success and failure-path coverage.
 
+CI gate:
+- GitHub Actions workflow `.github/workflows/ci.yml` runs server/web test+build on every PR.
+- Keep CI green before asking for review or merge.
+
 ## 6. Manual QA Checklist
 
 Before submitting:
