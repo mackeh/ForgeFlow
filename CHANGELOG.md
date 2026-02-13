@@ -14,11 +14,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Workflow builder controls for undo/redo and explicit edge disconnect.
 - Web recorder stop endpoint (`/api/recorders/web/stop`) and recorder navigation event capture.
 - Recorder draft review panel with reorder/edit/skip controls before inserting recorded steps.
+- Autopilot plan diagnostics: overall confidence score, node-level insights, and fallback template options.
 
 ### Changed
 - CI now includes browser smoke validation (`Web E2E Smoke`).
 - Web editor keyboard shortcuts now include undo/redo and selection-aware delete behavior.
 - Web recorder now follows capture -> review -> insert flow instead of immediate node injection.
+- Autopilot now requires explicit confirm-before-create flow and uses richer starter templates for vague prompts.
 
 ## [1.0.7] - 2026-02-13
 

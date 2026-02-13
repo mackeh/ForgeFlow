@@ -290,6 +290,55 @@ button.is-loading {
   color: var(--muted);
 }
 
+.autopilot-plan {
+  border: 1px solid rgba(44, 185, 176, 0.35);
+  background: rgba(44, 185, 176, 0.08);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.autopilot-plan-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.autopilot-plan-warnings small {
+  color: #f6d07a;
+}
+
+.autopilot-plan-nodes,
+.autopilot-plan-fallbacks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.autopilot-plan-node {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.autopilot-plan-node small {
+  color: var(--muted);
+}
+
+.autopilot-plan-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .selected-events {
   display: flex;
   gap: 6px;

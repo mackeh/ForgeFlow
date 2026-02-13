@@ -11,11 +11,13 @@ Goal: Generate a working workflow from plain language.
 Open vendor portal, extract invoice rows, normalize fields with AI, post to API, require manager approval over $1000.
 ```
 3. Click `Generate with Autopilot`.
-4. Review generated nodes and adjust selectors/keys in `Inspector`.
-5. Click `Test Run` and inspect `Run Diagnostics`.
+4. Review confidence score, node-level suggestions, and warnings in the Autopilot plan panel.
+5. Click `Create Draft Workflow` to confirm.
+6. Adjust selectors/keys in `Inspector`.
+7. Click `Test Run` and inspect `Run Diagnostics`.
 
 Expected outcome:
-- A draft workflow is created.
+- A reviewed draft workflow is created only after explicit confirmation.
 - AI/data nodes are prewired with context keys.
 - Run timeline and logs update without manual node creation.
 

@@ -92,6 +92,24 @@ export type AutopilotPlan = {
   description: string;
   capabilities: string[];
   warnings: string[];
+  confidence: number;
+  requiresConfirmation: boolean;
+  fallbackUsed: boolean;
+  fallbackTemplateId?: string;
+  fallbackOptions: Array<{
+    id: string;
+    name: string;
+    description: string;
+    reason: string;
+  }>;
+  nodeInsights: Array<{
+    nodeId: string;
+    nodeType: string;
+    label: string;
+    confidence: number;
+    reason: string;
+    warnings: string[];
+  }>;
   definition: WorkflowDefinition;
 };
 

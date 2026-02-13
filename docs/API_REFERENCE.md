@@ -221,6 +221,12 @@ curl -sS http://localhost:8080/api/autopilot/plan \
   -d '{"prompt":"Open website, scrape invoice table, clean with AI, and send to API"}'
 ```
 
+Response highlights:
+- `confidence`: overall plan confidence score (`0.0-1.0`)
+- `nodeInsights[]`: per-node confidence, reason, and warnings
+- `requiresConfirmation`: UI must confirm before creating workflow
+- `fallbackUsed` + `fallbackOptions[]`: starter templates for vague prompts
+
 ## Document Understanding
 
 ```bash
