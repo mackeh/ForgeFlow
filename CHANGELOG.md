@@ -1,0 +1,47 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Release automation workflow (`.github/workflows/release.yml`) for tag-driven publishing.
+- Semver tag helper script (`scripts/release-version.sh`) with `patch`, `minor`, `major` bump modes.
+
+### Changed
+- CI now includes browser smoke validation (`Web E2E Smoke`).
+
+## [1.0.7] - 2026-02-13
+
+### Fixed
+- Playwright mining smoke test selector ambiguity (`Mining` vs `Refresh Mining`).
+
+## [1.0.6] - 2026-02-13
+
+### Added
+- Playwright E2E smoke suite for login, workflow run, orchestrator queue/dispatch, and mining panel load.
+- Deterministic web API mock harness for browser tests.
+- CI job for browser smoke coverage.
+
+## [1.0.5] - 2026-02-13
+
+### Added
+- GitHub Actions CI baseline for server/web test+build on PRs and pushes.
+- CI status badge in README.
+
+## [1.0.4] - 2026-02-13
+
+### Added
+- `CODE_OF_CONDUCT.md`.
+- `LICENSE` (MIT).
+
+## [1.0.3] - 2026-02-13
+
+### Added
+- Orchestrator APIs and UI with robot/job queue and dispatch sync.
+- Process/task mining API and UI summary.
+- Document understanding and clipboard AI runtime capabilities.
+- Expanded contributor onboarding and demo documentation.

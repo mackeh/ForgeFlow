@@ -112,6 +112,14 @@ CI gate:
 - CI also runs Playwright smoke tests (`Web E2E Smoke`).
 - Keep CI green before asking for review or merge.
 
+Release flow:
+- Use root scripts to tag next version from `main`:
+  - `npm run release:patch`
+  - `npm run release:minor`
+  - `npm run release:major`
+- Tag push triggers `.github/workflows/release.yml`, which reruns verification and creates the GitHub release.
+- Record user-facing changes in `CHANGELOG.md`.
+
 ## 6. Manual QA Checklist
 
 Before submitting:

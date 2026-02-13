@@ -1,6 +1,7 @@
 # ForgeFlow
 
 [![CI](https://github.com/mackeh/ForgeFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/mackeh/ForgeFlow/actions/workflows/ci.yml)
+[![Release](https://github.com/mackeh/ForgeFlow/actions/workflows/release.yml/badge.svg)](https://github.com/mackeh/ForgeFlow/actions/workflows/release.yml)
 
 ForgeFlow is a local-first automation platform for web and desktop workflows.
 
@@ -97,6 +98,25 @@ Stop stack:
 docker compose down
 ```
 
+## Release Automation
+Create the next version tag from `main`:
+```bash
+npm run release:patch
+```
+
+Other bump modes:
+```bash
+npm run release:minor
+npm run release:major
+```
+
+Dry run:
+```bash
+npm run release:patch -- --dry-run
+```
+
+Tag pushes (`v*.*.*`) trigger `.github/workflows/release.yml`, which reruns validation and publishes a GitHub release with generated notes.
+
 ## Documentation Map
 - `docs/README.md`
 - `docs/DEMOS.md`
@@ -106,6 +126,7 @@ docker compose down
 - `docs/DEPLOYMENT.md`
 - `docs/CONTRIBUTING.md`
 - `AGENTS.md` (repository contributor guide)
+- `CHANGELOG.md`
 - `CODE_OF_CONDUCT.md`
 - `LICENSE`
 
