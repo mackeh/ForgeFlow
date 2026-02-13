@@ -19,23 +19,31 @@ import {
   clearToken,
   createAdminUser,
   createIntegration,
+  createOrchestratorJob,
+  createOrchestratorRobot,
   createWorkflowComment,
   createWebhook,
   createWorkflow,
   createWorkflowFromTemplate,
   createSchedule,
   deleteAdminUser,
+  disableTwoFactor,
   deleteIntegration,
   deleteSchedule,
   deleteWebhook,
   deleteWorkflowComment,
+  dispatchOrchestratorJob,
   generateAutopilotPlan,
   getActivities,
   getDashboardMetrics,
   getIntegrations,
+  getMiningSummary,
   getAdminUsers,
   getAuditEvents,
   getCurrentUser,
+  getOrchestratorJobs,
+  getOrchestratorOverview,
+  getOrchestratorRobots,
   getTwoFactorStatus,
   deleteWorkflow,
   getRoles,
@@ -68,9 +76,11 @@ import {
   startRecorder,
   startRun,
   stopDesktopRecorder,
+  syncOrchestratorJob,
   testIntegration,
   testWebhook,
   updateAdminUser,
+  updateOrchestratorRobot,
   updateRole,
   updateWebhook,
   updateSchedule,
@@ -86,6 +96,10 @@ import { filterNodeOptions, NODE_OPTIONS } from "./lib/nodeCatalog";
 import { buildPersistedDefinition, hashDefinition } from "./lib/workflowDraft";
 import type {
   ActivityCatalog,
+  MiningSummary,
+  OrchestratorJob,
+  OrchestratorOverview,
+  OrchestratorRobot,
   WorkflowDefinition,
   WorkflowRecord,
   WorkflowRunDetail,
@@ -279,6 +293,17 @@ export default function App() {
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState("all");
   const [schedules, setSchedules] = useState<any[]>([]);
   const [integrations, setIntegrations] = useState<IntegrationItem[]>([]);
+  const [orchestratorOverview, setOrchestratorOverview] = useState<OrchestratorOverview | null>(null);
+  const [orchestratorRobots, setOrchestratorRobots] = useState<OrchestratorRobot[]>([]);
+  const [orchestratorJobs, setOrchestratorJobs] = useState<OrchestratorJob[]>([]);
+  const [orchestratorRobotName, setOrchestratorRobotName] = useState("Unattended Robot");
+  const [orchestratorRobotMode, setOrchestratorRobotMode] = useState<"attended" | "unattended">("unattended");
+  const [orchestratorJobMode, setOrchestratorJobMode] = useState<"attended" | "unattended">("unattended");
+  const [orchestratorJobRobotId, setOrchestratorJobRobotId] = useState("");
+  const [orchestratorJobTestMode, setOrchestratorJobTestMode] = useState(false);
+  const [orchestratorJobInputText, setOrchestratorJobInputText] = useState("{}");
+  const [miningSummary, setMiningSummary] = useState<MiningSummary | null>(null);
+  const [miningDays, setMiningDays] = useState(14);
   const [integrationName, setIntegrationName] = useState("Primary API");
   const [integrationType, setIntegrationType] = useState("http_api");
   const [integrationConfigText, setIntegrationConfigText] = useState("{\"baseUrl\":\"https://example.com\"}");
@@ -583,12 +608,30 @@ export default function App() {
         showError(error);
       }
     });
+    refreshOrchestrator(activeWorkflow?.id).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!message.includes("Missing permission")) {
+        showError(error);
+      }
+    });
+    refreshMining().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!message.includes("Missing permission")) {
+        showError(error);
+      }
+    });
     refreshDashboard().catch(showError);
   }, [token]);
 
   useEffect(() => {
     if (!token || !activeWorkflow?.id) return;
     refreshSchedules(activeWorkflow.id).catch(showError);
+    refreshOrchestrator(activeWorkflow.id).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!message.includes("Missing permission")) {
+        showError(error);
+      }
+    });
   }, [token, activeWorkflow?.id]);
 
   useEffect(() => {
@@ -727,6 +770,16 @@ export default function App() {
   }, [dashboardDays, systemTime?.timezone, token]);
 
   useEffect(() => {
+    if (!token) return;
+    refreshMining(miningDays).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!message.includes("Missing permission")) {
+        showError(error);
+      }
+    });
+  }, [miningDays, token]);
+
+  useEffect(() => {
     if (!token) {
       setSchedulePreview(null);
       return;
@@ -859,6 +912,22 @@ export default function App() {
   async function refreshDashboard(days = dashboardDays) {
     const value = await getDashboardMetrics(days, systemTime?.timezone);
     setDashboard(value);
+  }
+
+  async function refreshOrchestrator(workflowId?: string) {
+    const [overview, robots, jobs] = await Promise.all([
+      getOrchestratorOverview(),
+      getOrchestratorRobots(),
+      getOrchestratorJobs({ workflowId })
+    ]);
+    setOrchestratorOverview(overview as OrchestratorOverview);
+    setOrchestratorRobots(Array.isArray(robots) ? robots : []);
+    setOrchestratorJobs(Array.isArray(jobs) ? jobs : []);
+  }
+
+  async function refreshMining(days = miningDays) {
+    const summary = await getMiningSummary(days);
+    setMiningSummary(summary as MiningSummary);
   }
 
   async function refreshAdmin() {
@@ -1009,6 +1078,17 @@ export default function App() {
     setWorkflowList([]);
     setRuns([]);
     setIntegrations([]);
+    setOrchestratorOverview(null);
+    setOrchestratorRobots([]);
+    setOrchestratorJobs([]);
+    setOrchestratorRobotName("Unattended Robot");
+    setOrchestratorRobotMode("unattended");
+    setOrchestratorJobMode("unattended");
+    setOrchestratorJobRobotId("");
+    setOrchestratorJobTestMode(false);
+    setOrchestratorJobInputText("{}");
+    setMiningSummary(null);
+    setMiningDays(14);
     setActiveRun(null);
     setRunDiff(null);
     setVersions([]);
@@ -1334,6 +1414,8 @@ export default function App() {
       set_variable: ["key"],
       http_request: ["url"],
       transform_llm: ["inputKey", "outputKey"],
+      document_understanding: ["inputKey", "outputKey"],
+      clipboard_ai_transfer: ["sourceKey", "targetKey"],
       validate_record: ["inputKey"],
       submit_guard: ["inputKey"],
       loop_iterate: ["inputKey"],
@@ -1372,6 +1454,8 @@ export default function App() {
           http_request: ["url"],
           set_variable: ["key"],
           transform_llm: ["inputKey", "outputKey"],
+          document_understanding: ["inputKey", "outputKey"],
+          clipboard_ai_transfer: ["sourceKey", "targetKey"],
           validate_record: ["inputKey"],
           submit_guard: ["inputKey"]
         };
@@ -1613,6 +1697,71 @@ export default function App() {
       outputKey
     });
     setFeedback(`CSV parsed (${rows.length} rows). Added node ${nodeId}.`, "success");
+  };
+
+  const handleCreateOrchestratorRobot = async () => {
+    const name = orchestratorRobotName.trim();
+    if (!name) {
+      setFeedback("Robot name is required", "error");
+      return;
+    }
+    await createOrchestratorRobot({
+      name,
+      mode: orchestratorRobotMode,
+      enabled: true,
+      maxConcurrentJobs: 1
+    });
+    setOrchestratorRobotName(orchestratorRobotMode === "attended" ? "Attended Robot" : "Unattended Robot");
+    await refreshOrchestrator(activeWorkflow?.id);
+    setFeedback("Robot created", "success");
+  };
+
+  const handleToggleOrchestratorRobot = async (robot: OrchestratorRobot) => {
+    await updateOrchestratorRobot(robot.id, { enabled: !robot.enabled, lastHeartbeatAt: new Date().toISOString() });
+    await refreshOrchestrator(activeWorkflow?.id);
+    setFeedback(robot.enabled ? "Robot disabled" : "Robot enabled", "success");
+  };
+
+  const handleCreateOrchestratorJob = async () => {
+    if (!activeWorkflow?.id) {
+      setFeedback("Select a workflow first", "error");
+      return;
+    }
+    let inputData: unknown = undefined;
+    const rawInput = orchestratorJobInputText.trim();
+    if (rawInput) {
+      try {
+        inputData = JSON.parse(rawInput);
+      } catch (error) {
+        setFeedback(`Invalid orchestrator input JSON: ${String(error)}`, "error");
+        return;
+      }
+    }
+    await createOrchestratorJob({
+      workflowId: activeWorkflow.id,
+      mode: orchestratorJobMode,
+      robotId: orchestratorJobRobotId || undefined,
+      testMode: orchestratorJobTestMode,
+      inputData
+    });
+    await refreshOrchestrator(activeWorkflow.id);
+    setFeedback("Orchestrator job queued", "success");
+  };
+
+  const handleDispatchOrchestratorJob = async (jobId: string) => {
+    const result = await dispatchOrchestratorJob(jobId);
+    await refreshOrchestrator(activeWorkflow?.id);
+    setFeedback(`Job dispatched (${result.run.id})`, "success");
+    if (activeWorkflow?.id) {
+      await refreshWorkflowMeta(activeWorkflow.id);
+      await refreshDashboard();
+    }
+  };
+
+  const handleSyncOrchestratorJob = async (jobId: string) => {
+    await syncOrchestratorJob(jobId);
+    await refreshOrchestrator(activeWorkflow?.id);
+    setFeedback("Orchestrator job status synced", "info");
   };
 
   const handleBeginTwoFactorSetup = async () => {
@@ -2012,6 +2161,8 @@ export default function App() {
     { id: "autopilot", label: "Autopilot" },
     { id: "templates", label: "Templates" },
     { id: "integrations", label: "Integrations" },
+    { id: "orchestrator", label: "Orchestrator" },
+    { id: "mining", label: "Mining" },
     { id: "schedules", label: "Schedules" },
     { id: "security", label: "Security" },
     { id: "secrets", label: "Secrets" }
@@ -2305,6 +2456,145 @@ export default function App() {
           placeholder="CSV file path (optional)"
         />
         <button onClick={() => handleImportCsvPreview().catch(showError)}>Parse CSV + Add Node</button>
+        <h3 id="sidebar-orchestrator">Orchestrator</h3>
+        <small>
+          Robots: {orchestratorOverview?.robotCount || 0} total ({orchestratorOverview?.enabledRobots || 0} enabled) ·
+          Jobs: {orchestratorOverview?.queuedJobs || 0} queued / {orchestratorOverview?.dispatchedJobs || 0} dispatched
+        </small>
+        <input
+          value={orchestratorRobotName}
+          onChange={(e) => setOrchestratorRobotName(e.target.value)}
+          placeholder="Robot name"
+        />
+        <select
+          value={orchestratorRobotMode}
+          onChange={(e) => setOrchestratorRobotMode(e.target.value as "attended" | "unattended")}
+        >
+          <option value="unattended">Unattended</option>
+          <option value="attended">Attended</option>
+        </select>
+        <button onClick={() => handleCreateOrchestratorRobot().catch(showError)}>Create Robot</button>
+        <div className="schedule-list">
+          {orchestratorRobots.slice(0, 8).map((robot) => (
+            <div key={robot.id} className="schedule-item">
+              <div>
+                <strong>{robot.name}</strong>
+                <small>
+                  {robot.mode} · {robot.enabled ? "enabled" : "disabled"} · max {robot.maxConcurrentJobs}
+                </small>
+                {robot.lastHeartbeatAt ? <small>Heartbeat: {new Date(robot.lastHeartbeatAt).toLocaleString()}</small> : null}
+              </div>
+              <div className="schedule-actions">
+                <button onClick={() => handleToggleOrchestratorRobot(robot).catch(showError)}>
+                  {robot.enabled ? "Disable" : "Enable"}
+                </button>
+              </div>
+            </div>
+          ))}
+          {!orchestratorRobots.length ? <small>No robots configured.</small> : null}
+        </div>
+        <small>Queue workflow job</small>
+        <select
+          value={orchestratorJobMode}
+          onChange={(e) => setOrchestratorJobMode(e.target.value as "attended" | "unattended")}
+        >
+          <option value="unattended">Unattended</option>
+          <option value="attended">Attended</option>
+        </select>
+        <select value={orchestratorJobRobotId} onChange={(e) => setOrchestratorJobRobotId(e.target.value)}>
+          <option value="">Auto-select robot</option>
+          {orchestratorRobots
+            .filter((robot) => robot.mode === orchestratorJobMode)
+            .map((robot) => (
+              <option key={robot.id} value={robot.id}>
+                {robot.name}
+              </option>
+            ))}
+        </select>
+        <label className="inline-option">
+          <input
+            type="checkbox"
+            checked={orchestratorJobTestMode}
+            onChange={(e) => setOrchestratorJobTestMode(e.target.checked)}
+          />
+          <span>Run job in test mode</span>
+        </label>
+        <textarea
+          value={orchestratorJobInputText}
+          onChange={(e) => setOrchestratorJobInputText(e.target.value)}
+          rows={3}
+          placeholder='{"source":"queue"}'
+        />
+        <button onClick={() => handleCreateOrchestratorJob().catch(showError)}>Queue Job</button>
+        <div className="schedule-list">
+          {orchestratorJobs.slice(0, 8).map((job) => (
+            <div key={job.id} className="schedule-item">
+              <div>
+                <strong>{job.status.toUpperCase()}</strong>
+                <small>
+                  {job.mode} · workflow {job.workflowId}
+                </small>
+                {job.runId ? <small>Run: {job.runId}</small> : null}
+                {job.runStatus ? <small>Run status: {job.runStatus}</small> : null}
+                {job.error ? <small>Error: {job.error}</small> : null}
+              </div>
+              <div className="schedule-actions">
+                {job.status === "queued" || job.status === "dispatched" ? (
+                  <button onClick={() => handleDispatchOrchestratorJob(job.id).catch(showError)}>Dispatch</button>
+                ) : null}
+                <button onClick={() => handleSyncOrchestratorJob(job.id).catch(showError)}>Sync</button>
+              </div>
+            </div>
+          ))}
+          {!orchestratorJobs.length ? <small>No queued jobs.</small> : null}
+        </div>
+        <h3 id="sidebar-mining">Process Mining</h3>
+        <small>
+          Window:
+          {" "}
+          <select value={miningDays} onChange={(e) => setMiningDays(Number(e.target.value))}>
+            <option value={7}>7 days</option>
+            <option value={14}>14 days</option>
+            <option value={30}>30 days</option>
+            <option value={60}>60 days</option>
+          </select>
+        </small>
+        <button onClick={() => refreshMining().catch(showError)}>Refresh Mining</button>
+        {miningSummary ? (
+          <>
+            <small>
+              Runs: {miningSummary.summary.totalRuns} · Failed: {miningSummary.summary.failedRuns} · Waiting approvals:{" "}
+              {miningSummary.summary.waitingApprovals}
+            </small>
+            <div className="schedule-list">
+              {miningSummary.opportunities.slice(0, 6).map((item) => (
+                <div key={item.workflowId} className="schedule-item">
+                  <div>
+                    <strong>{item.workflowName}</strong>
+                    <small>
+                      Score {item.automationOpportunityScore} · {item.failures} failures · {item.waitingApprovals} waits
+                    </small>
+                  </div>
+                </div>
+              ))}
+              {!miningSummary.opportunities.length ? <small>No mining opportunities found yet.</small> : null}
+            </div>
+            <div className="schedule-list">
+              {miningSummary.bottlenecks.slice(0, 5).map((node) => (
+                <div key={node.nodeId} className="schedule-item">
+                  <div>
+                    <strong>{node.nodeId}</strong>
+                    <small>
+                      Avg {node.avgDurationMs}ms · {node.failures} failures / {node.runs} runs
+                    </small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <small>No mining summary available.</small>
+        )}
         <h3 id="sidebar-schedules">Schedules</h3>
         <div className="schedule-preset-row">
           <select value={selectedSchedulePreset} onChange={(e) => setSelectedSchedulePreset(e.target.value)}>

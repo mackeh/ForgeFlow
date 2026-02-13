@@ -87,6 +87,26 @@ function quickFieldsForType(nodeType: string): QuickField[] {
         { key: "outputKey", label: "Output Key" },
         { key: "model", label: "Model" }
       ];
+    case "document_understanding":
+      return [
+        { key: "inputKey", label: "Input Key" },
+        { key: "outputKey", label: "Output Key" },
+        { key: "expectedFields", label: "Expected Fields (JSON array)" }
+      ];
+    case "clipboard_ai_transfer":
+      return [
+        { key: "sourceKey", label: "Source Key" },
+        { key: "targetKey", label: "Target Key" },
+        {
+          key: "aiNormalize",
+          label: "AI Normalize",
+          type: "select",
+          options: [
+            { label: "False", value: "false" },
+            { label: "True", value: "true" }
+          ]
+        }
+      ];
     case "validate_record":
     case "submit_guard":
       return [{ key: "inputKey", label: "Input Key" }];

@@ -1,50 +1,48 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `apps/web`: React + Vite frontend (`src/components`, `src/api.ts`, canvas UI in `src/App.tsx`).
-- `apps/server`: Express + TypeScript API and run engine (`src/lib/*.ts`), with Prisma schema/migrations in `prisma/`.
-- `apps/agent`: FastAPI desktop automation service (`main.py`).
-- `docs/`: architecture, API, deployment, and contribution docs.
-- `deploy/k8s/`: starter Kubernetes manifest.
-- Root scripts/config: `start.sh`, `docker-compose.yml`, `.env.example`.
+- `apps/web`: React + Vite frontend (workflow canvas, inspector, sidebars, API client in `src/api.ts`).
+- `apps/server`: Express + TypeScript API, run engine, scheduler, RBAC, and observability (`src/lib/*`).
+- `apps/server/prisma`: database schema and migrations.
+- `apps/agent`: FastAPI desktop automation bridge.
+- `docs`: architecture, API, deployment, demos, onboarding, and contribution docs.
+- `.github`: issue templates and PR template.
 
 ## Build, Test, and Development Commands
-- `./start.sh`: recommended local startup (builds/starts full Docker stack, runs migrations).
-- `AUTO_UPDATE=0 ./start.sh`: start without image auto-update.
-- `docker compose down`: stop all services.
-- `docker compose logs -f`: tail stack logs.
-- `docker compose run --rm server npm test`: run backend test suite in container.
-- `cd apps/web && npm test`: run web UI tests (Vitest).
-- Local app-by-app dev:
-  - `cd apps/server && npm install && npm run dev`
-  - `cd apps/web && npm install && npm run dev`
-  - `cd apps/agent && pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 7001`
-- UI power-use shortcuts: `Ctrl/Cmd+K` quick-add search, `Ctrl+S` save draft, `Ctrl+T` test run, `Ctrl+R` run, `Ctrl+D` duplicate node.
+- `./start.sh`: recommended full local stack bootstrap (DB migration + Docker services).
+- `AUTO_UPDATE=0 ./start.sh`: start without pulling/updating images.
+- `cd apps/server && npm test`: server unit/integration tests.
+- `cd apps/server && npm run build`: TypeScript compile check for server.
+- `cd apps/web && npm test`: UI tests (Vitest).
+- `cd apps/web && npm run build`: production web build check.
+- `docker compose logs -f`: follow runtime logs.
 
 ## Coding Style & Naming Conventions
-- TypeScript uses ESM modules, explicit types, and 2-space indentation.
-- Keep modules focused; prefer small helpers in `apps/server/src/lib`.
-- Validate API input with `zod` for new endpoints.
-- Test files use `*.test.ts` and are colocated with server logic.
-- Use clear, descriptive names (`schedulePreview`, `integrationStore`, `requirePermission`).
+- TypeScript uses ESM modules, explicit typing, and 2-space indentation.
+- Keep route validation in `zod` and business logic in `apps/server/src/lib`.
+- Name functions by behavior (`buildMiningSummary`, `createOrchestratorJob`).
+- Prefer focused modules over large multi-purpose files.
+- For UI, keep node types and labels aligned across:
+  - `apps/web/src/lib/nodeCatalog.ts`
+  - `apps/server/src/lib/activities.ts`
+  - `apps/server/src/lib/runner.ts`
 
 ## Testing Guidelines
-- Framework: Node test runner (`node --test`) executed via `tsx` in `apps/server`.
-- Run all server tests: `cd apps/server && npm test` (or Docker command above).
-- Critical regression subset: `cd apps/server && npm run test:critical`.
-- Coverage gate: no numeric threshold is enforced; new features should include success and failure-path tests on critical flows.
+- Add/extend `*.test.ts` beside server logic.
+- Cover success and failure paths for new nodes/endpoints.
+- For run-engine changes, include behavior tests in `apps/server/src/lib/execution-flows.test.ts`.
+- Validate both test and production build paths before PR.
 
 ## Commit & Pull Request Guidelines
-- Follow the existing history style: concise, imperative, and preferably Conventional Commit-like (`fix(ui): ...`, `docs: ...`, `refactor: ...`).
-- Keep commits focused by concern (UI, API, docs, security).
-- PRs should include:
-  - what changed and why
-  - how to validate (commands/endpoints)
-  - screenshots/GIFs for UI changes
-  - notes for migrations, env vars, or breaking behavior
-  - documentation updates in `README.md`, `QUICKSTART.md`, or `docs/*` when behavior changes
+- Use concise, imperative commit messages (`feat(orchestrator): add job sync endpoint`).
+- Keep commits scoped by concern (server, web, docs, infra).
+- Use `.github/pull_request_template.md` and include:
+  - change summary and rationale
+  - exact validation commands
+  - screenshots/GIFs for UI updates
+  - docs updates and risk/rollback notes
 
-## Security & Configuration Tips
-- Never commit real credentials; use `.env.example` for new config keys.
-- For auth/RBAC/webhook/secrets changes, include abuse-case and permission-path tests.
-- On Linux desktop automation, verify X11 access (`xhost +local:`) and `DISPLAY` in `.env`.
+## Security & Documentation Standards
+- Never commit real credentials; document new env vars in `.env.example`.
+- Enforce permission checks for protected endpoints and write audit events for sensitive actions.
+- If behavior/API changes, update `README.md`, `docs/API_REFERENCE.md`, and relevant docs (`docs/ARCHITECTURE.md`, `docs/DEMOS.md`, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`).

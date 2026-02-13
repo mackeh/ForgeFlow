@@ -38,6 +38,7 @@ flowchart LR
 - Express API and orchestration control plane.
 - Owns authentication, authorization, workflow CRUD/versioning, schedule management, run lifecycle, secrets, webhooks, metrics, and audit logging.
 - Includes Autopilot planner (`/api/autopilot/plan`) and activity catalog (`/api/activities`) for low-code generation workflows.
+- Includes document intelligence (`/api/document/understand`), orchestrator queue APIs (`/api/orchestrator/*`), and mining analytics (`/api/mining/summary`).
 - Exposes:
   - HTTP API (`/api/*`)
   - health/readiness (`/health`, `/ready`)
@@ -58,6 +59,7 @@ flowchart LR
   - `AUDIT_FILE`
   - `COLLAB_FILE`
   - `INTEGRATIONS_FILE`
+  - `ORCHESTRATOR_FILE`
 - Artifact directory (`/app/artifacts`) for screenshots/DOM snapshots/visual-diff outputs.
 
 ## 3. Core Runtime Flows
@@ -103,6 +105,17 @@ sequenceDiagram
 2. API builds a deterministic draft definition from recognized intents (web, scraping, API, AI, approvals).
 3. UI creates workflow with returned definition and opens it for editing.
 4. User refines generated nodes in inspector before publish/run.
+
+### Orchestrator Queue Dispatch
+1. User queues job via `/api/orchestrator/jobs`.
+2. Dispatch resolves workflow version and optional unattended robot.
+3. Server creates run and hands execution to the standard run engine.
+4. Job status is synced from linked run status (`queued` -> `dispatched` -> `completed/failed`).
+
+### Process/Task Mining
+1. API loads recent runs and audit events for requested window.
+2. Mining pipeline computes bottlenecks (slow/failing nodes), process variants, and workflow opportunity scores.
+3. UI surfaces opportunities and bottlenecks in sidebar for iterative automation improvements.
 
 ### Approval Gate
 1. `manual_approval` node pauses run with `WAITING_APPROVAL`.

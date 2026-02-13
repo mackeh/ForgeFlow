@@ -94,3 +94,77 @@ export type AutopilotPlan = {
   warnings: string[];
   definition: WorkflowDefinition;
 };
+
+export type DocumentUnderstandingResult = {
+  rawText: string;
+  fields: Record<string, string | null>;
+  entities: Array<{ key: string; value: string }>;
+  confidence: number;
+};
+
+export type OrchestratorRobot = {
+  id: string;
+  name: string;
+  mode: "attended" | "unattended";
+  enabled: boolean;
+  labels: string[];
+  maxConcurrentJobs: number;
+  lastHeartbeatAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrchestratorJob = {
+  id: string;
+  workflowId: string;
+  mode: "attended" | "unattended";
+  status: "queued" | "dispatched" | "completed" | "failed" | "cancelled";
+  robotId?: string;
+  testMode: boolean;
+  inputData?: unknown;
+  runId?: string;
+  runStatus?: string | null;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrchestratorOverview = {
+  robotCount: number;
+  enabledRobots: number;
+  queuedJobs: number;
+  dispatchedJobs: number;
+  byStatus: Record<string, number>;
+};
+
+export type MiningSummary = {
+  periodDays: number;
+  generatedAt: string;
+  summary: {
+    totalRuns: number;
+    failedRuns: number;
+    waitingApprovals: number;
+  };
+  bottlenecks: Array<{
+    nodeId: string;
+    avgDurationMs: number;
+    runs: number;
+    failures: number;
+  }>;
+  processVariants: Array<{
+    sequence: string;
+    count: number;
+  }>;
+  opportunities: Array<{
+    workflowId: string;
+    workflowName: string;
+    failures: number;
+    waitingApprovals: number;
+    totalRuns: number;
+    automationOpportunityScore: number;
+  }>;
+  topHumanActions: Array<{
+    key: string;
+    count: number;
+  }>;
+};

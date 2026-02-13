@@ -1,6 +1,11 @@
 import type {
   ActivityCatalog,
   AutopilotPlan,
+  DocumentUnderstandingResult,
+  MiningSummary,
+  OrchestratorJob,
+  OrchestratorOverview,
+  OrchestratorRobot,
   WorkflowDefinition,
   WorkflowRecord,
   WorkflowRunDetail,
@@ -140,6 +145,89 @@ export function generateAutopilotPlan(payload: { prompt: string; name?: string }
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+export function understandDocument(payload: { text: string; expectedFields?: string[] }) {
+  return request<DocumentUnderstandingResult>("/api/document/understand", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getOrchestratorOverview() {
+  return request<OrchestratorOverview>("/api/orchestrator/overview");
+}
+
+export function getOrchestratorRobots() {
+  return request<OrchestratorRobot[]>("/api/orchestrator/robots");
+}
+
+export function createOrchestratorRobot(payload: {
+  name: string;
+  mode?: "attended" | "unattended";
+  enabled?: boolean;
+  labels?: string[];
+  maxConcurrentJobs?: number;
+}) {
+  return request<OrchestratorRobot>("/api/orchestrator/robots", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateOrchestratorRobot(
+  id: string,
+  payload: {
+    name?: string;
+    mode?: "attended" | "unattended";
+    enabled?: boolean;
+    labels?: string[];
+    maxConcurrentJobs?: number;
+    lastHeartbeatAt?: string;
+  }
+) {
+  return request<OrchestratorRobot>(`/api/orchestrator/robots/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getOrchestratorJobs(params?: { status?: string; workflowId?: string }) {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.workflowId) q.set("workflowId", params.workflowId);
+  const query = q.toString();
+  return request<OrchestratorJob[]>(`/api/orchestrator/jobs${query ? `?${query}` : ""}`);
+}
+
+export function createOrchestratorJob(payload: {
+  workflowId: string;
+  mode?: "attended" | "unattended";
+  robotId?: string;
+  testMode?: boolean;
+  inputData?: unknown;
+}) {
+  return request<OrchestratorJob>("/api/orchestrator/jobs", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function dispatchOrchestratorJob(id: string) {
+  return request<{ job: OrchestratorJob; run: WorkflowRunSummary }>(`/api/orchestrator/jobs/${id}/dispatch`, {
+    method: "POST"
+  });
+}
+
+export function syncOrchestratorJob(id: string) {
+  return request<OrchestratorJob>(`/api/orchestrator/jobs/${id}/sync`, {
+    method: "POST"
+  });
+}
+
+export function getMiningSummary(days = 14) {
+  const q = new URLSearchParams({ days: String(days) });
+  return request<MiningSummary>(`/api/mining/summary?${q.toString()}`);
 }
 
 export function createWorkflowFromTemplate(payload: { templateId: string; name?: string }) {

@@ -11,6 +11,7 @@ import {
 } from "./validation.js";
 import { dispatchWebhookEvent } from "./webhooks.js";
 import { getIntegration, parseCsvRows } from "./integrationStore.js";
+import { understandDocument } from "./documentUnderstanding.js";
 
 const agentBaseUrl = process.env.AGENT_BASE_URL || "http://agent:7001";
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://ollama:11434";
@@ -507,6 +508,22 @@ async function executeNode(args: {
       await runLlm(node.data, context);
       return { outputKey: node.data?.outputKey };
     }
+    case "document_understanding": {
+      const inputKey = String(node.data?.inputKey || "");
+      if (!inputKey) throw new Error("document_understanding missing inputKey");
+      const outputKey = String(node.data?.outputKey || "document");
+      const raw = context[inputKey];
+      const text = typeof raw === "string" ? raw : JSON.stringify(raw || "");
+      const expectedFields = Array.isArray(node.data?.expectedFields)
+        ? node.data.expectedFields.map((item: unknown) => String(item || ""))
+        : undefined;
+      context[outputKey] = understandDocument({ text, expectedFields });
+      return { outputKey };
+    }
+    case "clipboard_ai_transfer": {
+      const outputKey = await runClipboardAiTransfer(node.data, context, prisma);
+      return { outputKey };
+    }
     case "validate_record": {
       const input = context[node.data?.inputKey];
       const result = validateRecord(input, node.data || {});
@@ -956,6 +973,32 @@ async function executeInlineTask(args: {
     };
   }
 
+  if (taskType === "document_understanding") {
+    const inputKey = String(task?.inputKey || "");
+    if (!inputKey) throw new Error(`${taskType} task ${taskId} missing inputKey`);
+    const outputKey = String(task?.outputKey || "document");
+    const raw = context[inputKey];
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw || "");
+    const expectedFields = Array.isArray(task?.expectedFields)
+      ? task.expectedFields.map((item: unknown) => String(item || ""))
+      : undefined;
+    context[outputKey] = understandDocument({ text, expectedFields });
+    return {
+      taskId,
+      taskType,
+      outputKey
+    };
+  }
+
+  if (taskType === "clipboard_ai_transfer") {
+    const outputKey = await runClipboardAiTransfer(task, context, prisma);
+    return {
+      taskId,
+      taskType,
+      outputKey
+    };
+  }
+
   if (taskType === "validate_record") {
     const input = context[task?.inputKey];
     const result = validateRecord(input, task || {});
@@ -1039,6 +1082,47 @@ async function runLlm(data: any, context: ExecutionContext) {
   }
 
   context[data?.outputKey || "llm_output"] = output;
+}
+
+async function runClipboardAiTransfer(data: any, context: ExecutionContext, prisma: PrismaClient) {
+  const sourceKey = String(data?.sourceKey || "");
+  if (!sourceKey) {
+    throw new Error("clipboard_ai_transfer missing sourceKey");
+  }
+  const targetKey = String(data?.targetKey || "clipboardValue");
+  const raw = await interpolateWithSecrets(context[sourceKey], context, prisma);
+
+  let value: unknown = raw;
+  if (typeof value === "string") {
+    const normalized = value
+      .replace(/\r/g, "")
+      .replace(/[ \t]+/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    value = normalized;
+
+    if (data?.aiNormalize) {
+      value = normalized
+        .replace(/\bO\b/g, "0")
+        .replace(/\bl\b/g, "1")
+        .replace(/\s+([.,;:!?])/g, "$1");
+    }
+  }
+
+  context[targetKey] = value;
+  const history = Array.isArray((context as any).__clipboardHistory) ? ((context as any).__clipboardHistory as any[]) : [];
+  history.push({
+    at: new Date().toISOString(),
+    sourceKey,
+    targetKey,
+    preview: typeof value === "string" ? value.slice(0, 120) : JSON.stringify(value)?.slice(0, 120) || String(value)
+  });
+  if (history.length > 100) {
+    history.splice(0, history.length - 100);
+  }
+  (context as any).__clipboardHistory = history;
+  return targetKey;
 }
 
 async function runDesktop(type: string, data: any, context: ExecutionContext, prisma: PrismaClient) {

@@ -1,7 +1,7 @@
 export type NodeOption = {
   label: string;
   type: string;
-  category: "Core" | "Control" | "Data" | "Web" | "Desktop";
+  category: "Core" | "Control" | "Data" | "Web" | "Desktop" | "AI";
   aliases?: string[];
 };
 
@@ -17,6 +17,8 @@ export const NODE_OPTIONS: NodeOption[] = [
   { label: "Parallel Execute", type: "parallel_execute", category: "Control", aliases: ["concurrent"] },
   { label: "CSV Import", type: "data_import_csv", category: "Data", aliases: ["spreadsheet"] },
   { label: "Integration Request", type: "integration_request", category: "Data", aliases: ["connector"] },
+  { label: "Document Understanding", type: "document_understanding", category: "AI", aliases: ["ocr", "invoice", "pdf"] },
+  { label: "Clipboard AI Transfer", type: "clipboard_ai_transfer", category: "AI", aliases: ["copy", "paste", "normalize"] },
   { label: "Web Navigate", type: "playwright_navigate", category: "Web", aliases: ["browser", "open"] },
   { label: "Web Click", type: "playwright_click", category: "Web", aliases: ["selector"] },
   { label: "Web Fill", type: "playwright_fill", category: "Web", aliases: ["form", "input"] },

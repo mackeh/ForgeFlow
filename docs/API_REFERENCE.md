@@ -60,7 +60,21 @@ Base URL (local): `http://localhost:8080`
 | POST | `/api/autopilot/plan` | `workflows:write` | Generate workflow draft definition from natural-language prompt |
 | POST | `/api/workflows/from-template` | `workflows:write` | Create workflow from template |
 
-## 6. Workflows and Collaboration
+## 6. Document Intelligence and Orchestrator
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| POST | `/api/document/understand` | `workflows:execute` | Extract key fields/entities from raw document text |
+| GET | `/api/orchestrator/overview` | `workflows:execute` | Robot/job overview counters |
+| GET | `/api/orchestrator/robots` | `workflows:execute` | List robots |
+| POST | `/api/orchestrator/robots` | `workflows:execute` | Create robot |
+| PUT | `/api/orchestrator/robots/:id` | `workflows:execute` | Update robot |
+| GET | `/api/orchestrator/jobs` | `workflows:execute` | List queued/dispatched/completed jobs |
+| POST | `/api/orchestrator/jobs` | `workflows:execute` | Create queued orchestrator job |
+| POST | `/api/orchestrator/jobs/:id/dispatch` | `workflows:execute` | Dispatch queued job to run engine |
+| POST | `/api/orchestrator/jobs/:id/sync` | `workflows:execute` | Sync job status from linked run |
+
+## 7. Workflows and Collaboration
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -78,7 +92,7 @@ Base URL (local): `http://localhost:8080`
 | DELETE | `/api/workflows/:id/comments/:commentId` | `workflows:write` | Delete comment (author/admin) |
 | GET | `/api/workflows/:id/runs` | `workflows:read` | List recent runs for workflow |
 
-## 7. Runs and Approvals
+## 8. Runs and Approvals
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -87,7 +101,7 @@ Base URL (local): `http://localhost:8080`
 | POST | `/api/runs/:id/approve` | `workflows:approve` | Approve/reject waiting approval node |
 | GET | `/api/runs/:id/diff-last-success` | `workflows:read` | Compare run node states to last successful baseline |
 
-## 8. Scheduling
+## 9. Scheduling
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -100,7 +114,7 @@ Base URL (local): `http://localhost:8080`
 | DELETE | `/api/schedules/:id` | `schedules:manage` | Delete schedule |
 | POST | `/api/schedules/:id/run-now` | `schedules:manage` | Trigger schedule immediately |
 
-## 9. Integrations
+## 10. Integrations
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -111,13 +125,14 @@ Base URL (local): `http://localhost:8080`
 | POST | `/api/integrations/:id/test` | `workflows:write` | Connectivity test for profile |
 | POST | `/api/integrations/import/csv` | `workflows:write` | Parse CSV text/file into structured rows |
 
-## 10. Metrics
+## 11. Metrics and Mining
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | GET | `/api/metrics/dashboard` | `metrics:read` | Aggregated dashboard metrics (runs/schedules/resources) |
+| GET | `/api/mining/summary` | `metrics:read` | Process/task mining summary (bottlenecks, variants, opportunities) |
 
-## 11. Admin (Users, Roles, Audit)
+## 12. Admin (Users, Roles, Audit)
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -129,7 +144,7 @@ Base URL (local): `http://localhost:8080`
 | PUT | `/api/admin/roles/:role` | `roles:manage` | Upsert role permissions |
 | GET | `/api/admin/audit` | `audit:read` | Query audit events with filters |
 
-## 12. Webhooks
+## 13. Webhooks
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -140,14 +155,14 @@ Base URL (local): `http://localhost:8080`
 | DELETE | `/api/webhooks/:id` | `webhooks:manage` | Delete webhook subscription |
 | POST | `/api/webhooks/:id/test` | `webhooks:manage` | Send synthetic test event |
 
-## 13. Secrets
+## 14. Secrets
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | GET | `/api/secrets` | `secrets:read` | List secret keys/metadata |
 | POST | `/api/secrets` | `secrets:write` | Create or update encrypted secret |
 
-## 14. Recorders
+## 15. Recorders
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
@@ -155,7 +170,7 @@ Base URL (local): `http://localhost:8080`
 | POST | `/api/recorders/desktop/start` | `workflows:write` | Starts desktop recorder session |
 | POST | `/api/recorders/desktop/stop` | `workflows:write` | Stops desktop recorder session |
 
-## 15. WebSocket Endpoints
+## 16. WebSocket Endpoints
 
 Base WS URL: `ws://localhost:8080/ws`
 
@@ -164,7 +179,7 @@ Base WS URL: `ws://localhost:8080/ws`
 | Recorder | `?type=recorder&sessionId=<id>` | Streams recorder events (`recorder:ready`, `recorder:event`) |
 | Collaboration | `?type=collab&workflowId=<id>&token=<jwt>` | Live workflow presence (`collab:ready`, `collab:presence`, `collab:pong`) |
 
-## 16. Payload and Usage Examples
+## 17. Payload and Usage Examples
 
 ## Login
 
@@ -203,6 +218,15 @@ curl -sS http://localhost:8080/api/autopilot/plan \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"Open website, scrape invoice table, clean with AI, and send to API"}'
+```
+
+## Document Understanding
+
+```bash
+curl -sS http://localhost:8080/api/document/understand \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Invoice Number: INV-1001\nTotal: $1200.00","expectedFields":["invoice_number","total_amount"]}'
 ```
 
 ## Start Test Run
@@ -256,6 +280,22 @@ curl -sS http://localhost:8080/api/integrations \
     "type":"http_api",
     "config":{"baseUrl":"https://api.example.com","headers":{"X-Key":"abc"}}
   }'
+```
+
+## Queue Orchestrator Job
+
+```bash
+curl -sS http://localhost:8080/api/orchestrator/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"workflowId":"<workflow-id>","mode":"unattended","testMode":true}'
+```
+
+## Mining Summary
+
+```bash
+curl -sS "http://localhost:8080/api/mining/summary?days=14" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Create Webhook

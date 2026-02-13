@@ -286,6 +286,71 @@ test("transform_llm node uses deterministic fallback when model output is invali
   }
 });
 
+test("document_understanding extracts key fields from text input", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "doc",
+        data: {
+          type: "document_understanding",
+          inputKey: "docText",
+          outputKey: "docParsed",
+          expectedFields: ["invoice_number", "total_amount"]
+        }
+      }
+    ],
+    [{ id: "e-start-doc", source: "start", target: "doc" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({
+      id: "run-doc",
+      testMode: true,
+      inputData: { docText: "Invoice Number: INV-2026\nTotal: $99.10" }
+    })
+  });
+
+  await startRun(harness.prisma, "run-doc");
+  const finished = harness.getRun("run-doc");
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(finished?.context?.docParsed?.fields?.invoice_number, "INV-2026");
+  assert.equal(finished?.context?.docParsed?.fields?.total_amount, "$99.10");
+});
+
+test("clipboard_ai_transfer normalizes text between context keys", async () => {
+  const definition = workflowDefinition(
+    [
+      { id: "start", data: { type: "start", label: "Start" } },
+      {
+        id: "clip",
+        data: {
+          type: "clipboard_ai_transfer",
+          sourceKey: "rawText",
+          targetKey: "cleanText",
+          aiNormalize: true
+        }
+      }
+    ],
+    [{ id: "e-start-clip", source: "start", target: "clip" }]
+  );
+
+  const harness = createInMemoryRunnerPrisma({
+    workflow: baseWorkflow({ draftDefinition: definition, definition }),
+    run: baseRun({
+      id: "run-clip",
+      testMode: true,
+      inputData: { rawText: " Hello   world \n\n\nO l " }
+    })
+  });
+
+  await startRun(harness.prisma, "run-clip");
+  const finished = harness.getRun("run-clip");
+  assert.equal(finished?.status, "SUCCEEDED");
+  assert.equal(finished?.context?.cleanText, "Hello world\n\n0 1");
+});
+
 test("parallel_execute runs independent tasks concurrently and stores summary output", async () => {
   const definition = workflowDefinition(
     [

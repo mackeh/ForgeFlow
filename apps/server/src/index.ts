@@ -38,6 +38,19 @@ import { buildSchedulePreview, buildUpcomingRuns, listSchedulePresets } from "./
 import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
 import { listActivities } from "./lib/activities.js";
 import { buildAutopilotPlan } from "./lib/autopilot.js";
+import { understandDocument } from "./lib/documentUnderstanding.js";
+import { buildMiningSummary } from "./lib/mining.js";
+import {
+  createOrchestratorJob,
+  createOrchestratorRobot,
+  getOrchestratorJob,
+  getOrchestratorRobot,
+  listOrchestratorJobs,
+  listOrchestratorRobots,
+  orchestratorOverview,
+  updateOrchestratorJob,
+  updateOrchestratorRobot
+} from "./lib/orchestratorStore.js";
 import {
   beginTwoFactorSetup,
   confirmTwoFactorSetup,
@@ -422,6 +435,8 @@ const canManageSchedules = requirePermission("schedules:manage");
 const canReadTemplates = requirePermission("templates:read");
 const canReadActivities = requirePermission("templates:read");
 const canReadMetrics = requirePermission("metrics:read");
+const canUseDocumentUnderstanding = requirePermission("workflows:execute");
+const canManageOrchestrator = requirePermission("workflows:execute");
 const canReadSecrets = requirePermission("secrets:read");
 const canWriteSecrets = requirePermission("secrets:write");
 const canManageUsers = requirePermission("users:manage");
@@ -557,6 +572,265 @@ app.post("/api/autopilot/plan", canWriteWorkflows, async (req, res) => {
     }
   });
   res.json(plan);
+});
+
+app.post("/api/document/understand", canUseDocumentUnderstanding, async (req, res) => {
+  const schema = z.object({
+    text: z.string().min(1),
+    expectedFields: z.array(z.string()).optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  const result = understandDocument({
+    text: parsed.data.text,
+    expectedFields: parsed.data.expectedFields
+  });
+  await writeAuditEvent(req, {
+    action: "document.understand",
+    resourceType: "document",
+    metadata: {
+      expectedFieldCount: parsed.data.expectedFields?.length || 0,
+      confidence: result.confidence
+    }
+  });
+  res.json(result);
+});
+
+app.get("/api/orchestrator/overview", canManageOrchestrator, async (_req, res) => {
+  const overview = await orchestratorOverview();
+  res.json(overview);
+});
+
+app.get("/api/orchestrator/robots", canManageOrchestrator, async (_req, res) => {
+  const robots = await listOrchestratorRobots();
+  res.json(robots);
+});
+
+app.post("/api/orchestrator/robots", canManageOrchestrator, async (req, res) => {
+  const schema = z.object({
+    name: z.string().min(1),
+    mode: z.enum(["attended", "unattended"]).optional(),
+    enabled: z.boolean().optional(),
+    labels: z.array(z.string()).optional(),
+    maxConcurrentJobs: z.number().int().positive().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  const robot = await createOrchestratorRobot(parsed.data);
+  await writeAuditEvent(req, {
+    action: "orchestrator.robot.create",
+    resourceType: "orchestrator_robot",
+    resourceId: robot.id,
+    metadata: {
+      mode: robot.mode,
+      enabled: robot.enabled
+    }
+  });
+  res.json(robot);
+});
+
+app.put("/api/orchestrator/robots/:id", canManageOrchestrator, async (req, res) => {
+  const schema = z.object({
+    name: z.string().optional(),
+    mode: z.enum(["attended", "unattended"]).optional(),
+    enabled: z.boolean().optional(),
+    labels: z.array(z.string()).optional(),
+    maxConcurrentJobs: z.number().int().positive().optional(),
+    lastHeartbeatAt: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  try {
+    const robot = await updateOrchestratorRobot(req.params.id, parsed.data);
+    await writeAuditEvent(req, {
+      action: "orchestrator.robot.update",
+      resourceType: "orchestrator_robot",
+      resourceId: robot.id
+    });
+    res.json(robot);
+  } catch (error) {
+    respondWithError(res, error);
+  }
+});
+
+app.get("/api/orchestrator/jobs", canManageOrchestrator, async (req, res) => {
+  const status =
+    typeof req.query.status === "string" && req.query.status.trim()
+      ? (req.query.status.trim() as "queued" | "dispatched" | "completed" | "failed" | "cancelled")
+      : undefined;
+  const workflowId =
+    typeof req.query.workflowId === "string" && req.query.workflowId.trim() ? req.query.workflowId.trim() : undefined;
+  const jobs = await listOrchestratorJobs({ status, workflowId });
+  const runIds = jobs.map((job) => job.runId).filter(Boolean) as string[];
+  let runsById = new Map<string, { status: string; startedAt?: Date | null; finishedAt?: Date | null }>();
+  if (runIds.length) {
+    const runs = await prisma.run.findMany({
+      where: { id: { in: runIds } },
+      select: { id: true, status: true, startedAt: true, finishedAt: true }
+    });
+    runsById = new Map(runs.map((run) => [run.id, run]));
+  }
+  res.json(
+    jobs.map((job) => ({
+      ...job,
+      runStatus: job.runId ? runsById.get(job.runId)?.status || null : null
+    }))
+  );
+});
+
+app.post("/api/orchestrator/jobs", canManageOrchestrator, async (req, res) => {
+  const schema = z.object({
+    workflowId: z.string().min(1),
+    mode: z.enum(["attended", "unattended"]).optional(),
+    robotId: z.string().optional(),
+    testMode: z.boolean().optional(),
+    inputData: z.any().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  const workflow = await prisma.workflow.findUnique({
+    where: { id: parsed.data.workflowId },
+    select: { id: true }
+  });
+  if (!workflow) {
+    res.status(404).json({ error: "Workflow not found" });
+    return;
+  }
+  const job = await createOrchestratorJob(parsed.data);
+  await writeAuditEvent(req, {
+    action: "orchestrator.job.create",
+    resourceType: "orchestrator_job",
+    resourceId: job.id,
+    metadata: {
+      workflowId: job.workflowId,
+      mode: job.mode
+    }
+  });
+  res.json(job);
+});
+
+app.post("/api/orchestrator/jobs/:id/dispatch", canManageOrchestrator, async (req, res) => {
+  const job = await getOrchestratorJob(req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  if (job.status !== "queued" && job.status !== "dispatched") {
+    res.status(400).json({ error: "Job cannot be dispatched in current state" });
+    return;
+  }
+
+  const workflow = await prisma.workflow.findUnique({ where: { id: job.workflowId }, select: { id: true } });
+  if (!workflow) {
+    await updateOrchestratorJob(job.id, { status: "failed", error: "Workflow not found" });
+    res.status(404).json({ error: "Workflow not found" });
+    return;
+  }
+
+  let selectedRobotId = job.robotId;
+  if (job.mode === "unattended") {
+    if (selectedRobotId) {
+      const robot = await getOrchestratorRobot(selectedRobotId);
+      if (!robot || !robot.enabled || robot.mode !== "unattended") {
+        res.status(400).json({ error: "Selected unattended robot is unavailable" });
+        return;
+      }
+    } else {
+      const robots = await listOrchestratorRobots();
+      const candidate = robots.find((robot) => robot.enabled && robot.mode === "unattended");
+      if (!candidate) {
+        res.status(400).json({ error: "No enabled unattended robot available" });
+        return;
+      }
+      selectedRobotId = candidate.id;
+    }
+  }
+
+  try {
+    const { version } = await getWorkflowDefinitionForRun(prisma, job.workflowId, Boolean(job.testMode));
+    const run = await prisma.run.create({
+      data: {
+        workflowId: job.workflowId,
+        workflowVersion: version,
+        testMode: Boolean(job.testMode),
+        inputData: job.inputData as any
+      }
+    });
+
+    startRun(prisma, run.id).catch((error) => {
+      logger.error("orchestrator.dispatch_async_failed", { jobId: job.id, runId: run.id, error });
+    });
+
+    const nextJob = await updateOrchestratorJob(job.id, {
+      status: "dispatched",
+      runId: run.id,
+      robotId: selectedRobotId
+    });
+    observability.incrementCounter("forgeflow_orchestrator_jobs_dispatched_total", {
+      mode: nextJob.mode
+    });
+    await writeAuditEvent(req, {
+      action: "orchestrator.job.dispatch",
+      resourceType: "orchestrator_job",
+      resourceId: nextJob.id,
+      metadata: {
+        runId: run.id,
+        robotId: selectedRobotId || null
+      }
+    });
+    await cache.delByPrefix("metrics:dashboard:");
+    res.json({ job: nextJob, run });
+  } catch (error) {
+    await updateOrchestratorJob(job.id, {
+      status: "failed",
+      error: String(error)
+    });
+    respondWithError(res, error);
+  }
+});
+
+app.post("/api/orchestrator/jobs/:id/sync", canManageOrchestrator, async (req, res) => {
+  const job = await getOrchestratorJob(req.params.id);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  if (!job.runId) {
+    res.json(job);
+    return;
+  }
+  const run = await prisma.run.findUnique({
+    where: { id: job.runId },
+    select: { id: true, status: true, finishedAt: true }
+  });
+  if (!run) {
+    const next = await updateOrchestratorJob(job.id, { status: "failed", error: "Dispatched run not found" });
+    res.json(next);
+    return;
+  }
+  if (run.status === "SUCCEEDED") {
+    const next = await updateOrchestratorJob(job.id, { status: "completed", error: "" });
+    res.json({ ...next, runStatus: run.status });
+    return;
+  }
+  if (run.status === "FAILED") {
+    const next = await updateOrchestratorJob(job.id, { status: "failed" });
+    res.json({ ...next, runStatus: run.status });
+    return;
+  }
+  res.json({ ...job, runStatus: run.status });
 });
 
 app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => {
@@ -1533,6 +1807,38 @@ app.get("/api/metrics/dashboard", canReadMetrics, async (req, res) => {
     };
   });
 
+  res.json(payload);
+});
+
+app.get("/api/mining/summary", canReadMetrics, async (req, res) => {
+  const daysRaw = typeof req.query.days === "string" ? Number(req.query.days) : 14;
+  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(90, Math.floor(daysRaw))) : 14;
+  const payload = await cache.getOrSet(`mining:summary:${days}`, CACHE_TTL.dashboardMs, async () => {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const runs = await prisma.run.findMany({
+      where: { createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 3000,
+      select: {
+        id: true,
+        status: true,
+        workflowId: true,
+        createdAt: true,
+        startedAt: true,
+        finishedAt: true,
+        logs: true,
+        nodeStates: true,
+        workflow: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+    const audits = await listAuditEvents({ limit: 2000 });
+    return buildMiningSummary(runs as any, audits as any, { days });
+  });
   res.json(payload);
 });
 

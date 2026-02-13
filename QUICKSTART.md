@@ -102,6 +102,16 @@ Integrations:
 - test it
 - use via `integration_request` node
 
+Orchestrator:
+- add unattended/attended robots in sidebar `Orchestrator`
+- queue jobs for the selected workflow
+- dispatch queued jobs and sync status back to linked runs
+
+Mining:
+- open sidebar `Process Mining`
+- pick a time window (7/14/30/60 days)
+- review automation opportunity scores and slowest nodes
+
 ## 7. Secrets and LLM Transform
 Save secret:
 - sidebar `Secrets`
@@ -114,6 +124,14 @@ Use LLM node:
 - add `transform_llm`
 - set `inputKey` and `outputKey`
 - ensure Ollama model is available:
+
+Document Understanding node:
+- add `document_understanding`
+- map `inputKey` (raw OCR/text) and `outputKey` (structured fields)
+
+Clipboard AI Transfer node:
+- add `clipboard_ai_transfer`
+- set `sourceKey`, `targetKey`, and optional `aiNormalize`
 
 ```bash
 docker exec -it rpa-ollama ollama pull llama3.2

@@ -2,21 +2,19 @@
 
 ForgeFlow is a local-first automation platform for web and desktop workflows.
 
-It combines a visual node graph, reliable workflow execution, scheduling, approvals, local LLM transforms, and operational tooling in a single Docker-based stack.
+It combines a drag-and-drop workflow studio, resilient execution, AI-assisted automation, and centralized operations in one stack.
 
 ## What You Get
 - Visual workflow builder (React Flow)
 - Web automation (Playwright) and desktop automation (agent service)
-- Draft/publish workflow lifecycle with versions and rollback
-- Retry/timeout/checkpoint execution engine
-- Manual approvals and resume-from-failure
-- Templates, schedules, schedule presets, upcoming-run calendar
-- Autopilot draft generation from natural-language prompts
-- Activity catalog endpoint with available/planned activity packs
+- Recorder flows for web and desktop action capture
+- Autopilot workflow generation from natural-language prompts
+- AI nodes: `transform_llm`, `document_understanding`, `clipboard_ai_transfer`
 - Integrations (`http_api`, `postgresql`, `mysql`, `mongodb`, `google_sheets`, `airtable`, `s3`)
-- Secrets management (encrypted), webhook delivery, audit logging
-- Metrics dashboard + Prometheus `/metrics`
-- Local auth with optional TOTP 2FA
+- Orchestrator queue with attended/unattended robots and dispatch lifecycle
+- Process/task mining summary (bottlenecks, variants, opportunity scoring)
+- Draft/publish lifecycle, rollback, schedules, approvals, and resume-from-failure
+- RBAC, optional TOTP 2FA, encrypted secrets, audit log, webhooks, Prometheus metrics
 
 ## Services
 - `web`: `http://localhost:5173`
@@ -33,39 +31,35 @@ It combines a visual node graph, reliable workflow execution, scheduling, approv
 ```
 2. Open `http://localhost:5173`
 3. Sign in with `.env` credentials (default: `local` / `localpass`)
-4. Optional shortcuts: `Ctrl/Cmd+K` quick-add focus, `Ctrl+S` save, `Ctrl+T` test run, `Ctrl+R` run, `Ctrl+D` duplicate selected node
+4. Build your first flow and run `Test Run`
 
-`start.sh` will:
-- create `.env` from `.env.example` if missing
-- attempt X11 auth (`xhost +local:`) unless `AUTO_X11_AUTH=0`
-- run DB migration
-- bring up Docker Compose stack
-- auto-update images/builds unless `AUTO_UPDATE=0`
+Power shortcuts:
+- `Ctrl/Cmd+K` quick-add node search
+- `Ctrl+S` save draft
+- `Ctrl+T` test run
+- `Ctrl+R` run
+- `Ctrl+D` duplicate selected node
 
-For a full operator walkthrough, see `QUICKSTART.md`.
+## Demo Flows
+Use these guided demos to evaluate the platform quickly:
+- `docs/DEMOS.md#demo-1-autopilot-invoice-triage`
+- `docs/DEMOS.md#demo-2-orchestrator-unattended-queue`
+- `docs/DEMOS.md#demo-3-document-understanding-and-clipboard-ai`
 
-## Documentation
-- `docs/README.md`
-- `docs/ARCHITECTURE.md`
-- `docs/API_REFERENCE.md`
-- `docs/DEPLOYMENT.md`
-- `docs/CONTRIBUTING.md`
+## Contributor Onboarding
+New contributors should start here:
+1. `docs/ONBOARDING.md` (30-minute setup + first contribution path)
+2. `docs/CONTRIBUTING.md` (standards, testing, QA checklist)
+3. `.github/pull_request_template.md` (PR structure used in this repo)
 
-## Key Configuration
-Main `.env` variables:
-- `APP_USERNAME`, `APP_PASSWORD`
-- `JWT_SECRET`
-- `SECRET_ENCRYPTION_KEY`
-- `DATABASE_URL`, `REDIS_URL`
-- `OLLAMA_BASE_URL`, `AGENT_BASE_URL`
-- `DISPLAY`, `PLAYWRIGHT_HEADLESS`
-- `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `RATE_LIMIT_LOGIN_MAX`
-- `LOG_LEVEL`, `REQUEST_LOGS`
-- `AUTHZ_FILE`, `WEBHOOKS_FILE`, `SCHEDULES_FILE`, `AUDIT_FILE`
-- `SELECTOR_AI_ENABLED`, `SELECTOR_AI_MODEL`
+Good first areas:
+- UI polish and node inspector UX (`apps/web/src`)
+- New activity handlers (`apps/server/src/lib/runner.ts`)
+- New API endpoints with `zod` validation (`apps/server/src/index.ts`)
+- Docs and tutorials (`docs/*`)
 
-## Common Commands
-Start:
+## Development Commands
+Start stack:
 ```bash
 ./start.sh
 ```
@@ -75,19 +69,20 @@ Start without auto-update:
 AUTO_UPDATE=0 ./start.sh
 ```
 
-Run migrations manually:
-```bash
-docker compose run --rm server npm run prisma:migrate
-```
-
 Run backend tests:
 ```bash
-docker compose run --rm server npm test
+cd apps/server && npm test
 ```
 
-Run web UI tests:
+Run web tests:
 ```bash
 cd apps/web && npm test
+```
+
+Build server + web:
+```bash
+cd apps/server && npm run build
+cd apps/web && npm run build
 ```
 
 Stop stack:
@@ -95,27 +90,32 @@ Stop stack:
 docker compose down
 ```
 
-Logs:
-```bash
-docker compose logs -f
-```
+## Documentation Map
+- `docs/README.md`
+- `docs/DEMOS.md`
+- `docs/ONBOARDING.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `docs/DEPLOYMENT.md`
+- `docs/CONTRIBUTING.md`
+- `AGENTS.md` (repository contributor guide)
 
 ## API Areas
 - Auth: `/api/auth/*`
 - Workflows: `/api/workflows*`
 - Runs: `/api/runs*`
-- Templates: `/api/templates`, `/api/workflows/from-template`
-- Activities + Autopilot: `/api/activities`, `/api/autopilot/plan`
+- Templates/Autopilot: `/api/templates`, `/api/activities`, `/api/autopilot/plan`
+- Document AI: `/api/document/understand`
+- Orchestrator: `/api/orchestrator/*`
+- Mining: `/api/mining/summary`
 - Schedules: `/api/schedules*`
+- Integrations: `/api/integrations*`
 - Metrics dashboard: `/api/metrics/dashboard`
 - Prometheus metrics: `/metrics`
-- Integrations: `/api/integrations*`
-- Secrets: `/api/secrets*`
-- Webhooks: `/api/webhooks*`
-- Admin: `/api/admin/*`
+- Secrets/Webhooks/Admin: `/api/secrets*`, `/api/webhooks*`, `/api/admin/*`
 
 ## Troubleshooting
-Module not found in containers:
+Module mismatch in containers:
 ```bash
 docker compose up --build --renew-anon-volumes
 ```
@@ -124,16 +124,12 @@ Desktop automation issues on Linux:
 ```bash
 xhost +local:
 ```
-Check `.env` `DISPLAY` (usually `:0`).
+Then verify `.env` `DISPLAY` (usually `:0`).
 
-Ollama model missing:
+Missing Ollama model:
 ```bash
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
-
-Port `11434` already in use:
-- stop conflicting host service, or
-- change Ollama port mapping in `docker-compose.yml`.
 
 ## Support
 - https://buymeacoffee.com/mackeh

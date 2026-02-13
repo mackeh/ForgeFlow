@@ -2,6 +2,10 @@
 
 This guide standardizes local setup, coding practices, and contribution workflow.
 
+Start here if you are new:
+- `docs/ONBOARDING.md` for the fastest first-PR path.
+- `docs/DEMOS.md` for repeatable product walkthrough flows.
+
 ## 1. Prerequisites
 
 - Docker + Docker Compose
@@ -102,9 +106,12 @@ Before submitting:
 - [ ] Quick-add node search works (`Ctrl/Cmd+K`, type, `Enter`).
 - [ ] Duplicate selected node works (`Ctrl+D` and toolbar button).
 - [ ] Autopilot workflow generation works from sidebar prompt.
+- [ ] Orchestrator robot/job queue flow works (create robot, queue job, dispatch/sync).
+- [ ] Process mining panel loads and shows opportunities/bottlenecks.
 - [ ] Test run and production run both work.
 - [ ] Approval/resume behavior works for `manual_approval`.
 - [ ] Run diagnostics logs/artifacts render correctly.
+- [ ] Document understanding and clipboard AI transfer nodes validate and run as expected.
 - [ ] New UI interactions show success/error feedback.
 - [ ] No regressions in schedule and template flows.
 
