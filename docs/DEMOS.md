@@ -61,6 +61,20 @@ Expected outcome:
 - Edge disconnect works without deleting nodes.
 - Exported files include workflow schema metadata and can be re-imported.
 
+## Demo 5: Recorder Draft Review and Insert
+Goal: Capture browser actions, refine them, and insert a clean sequence.
+
+1. Click `Record Web` and optionally set a start URL in the recorder panel.
+2. Perform actions in the recorder browser (navigate, click, fill).
+3. Click `Stop Web` and review captured events.
+4. Reorder events, edit selectors/values, and mark noisy events as `Skip`.
+5. Click `Insert Sequence`, then run `Test Run`.
+
+Expected outcome:
+- Recorder events are captured as an editable draft before touching the canvas.
+- Inserted nodes are linked in sequence with stable defaults.
+- The resulting flow is cleaner than raw event capture.
+
 ## Demo Assets
 - Template source: `apps/server/src/lib/templates.ts`
 - Node catalog: `apps/web/src/lib/nodeCatalog.ts`
@@ -71,5 +85,6 @@ Expected outcome:
 - Demo 2: 4-6 minutes
 - Demo 3: 4-5 minutes
 - Demo 4: 4-6 minutes
+- Demo 5: 4-6 minutes
 
-Total: 19-24 minutes for a full product walkthrough.
+Total: 23-30 minutes for a full product walkthrough.

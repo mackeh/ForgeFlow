@@ -483,6 +483,104 @@ button.is-loading {
   width: 100%;
 }
 
+.recorder-review-panel {
+  border-bottom: 1px solid var(--border);
+  background: rgba(12, 18, 24, 0.92);
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recorder-review-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.recorder-review-head small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.recorder-review-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recorder-review-controls input {
+  min-width: 280px;
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.recorder-review-controls button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.recorder-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.recorder-review-item {
+  display: grid;
+  grid-template-columns: 120px minmax(130px, 170px) minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.recorder-review-item select,
+.recorder-review-item input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.recorder-review-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.recorder-review-meta small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.recorder-review-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.recorder-review-actions button {
+  font-size: 11px;
+  padding: 5px 7px;
+}
+
 .metrics-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1213,5 +1311,17 @@ button.is-loading {
   .toolbar-search {
     min-width: 100%;
     max-width: 100%;
+  }
+
+  .recorder-review-controls input {
+    min-width: 100%;
+  }
+
+  .recorder-review-item {
+    grid-template-columns: 1fr;
+  }
+
+  .recorder-review-actions {
+    justify-content: flex-start;
   }
 }

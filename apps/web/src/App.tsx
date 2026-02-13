@@ -74,6 +74,7 @@ import {
   previewSchedule as fetchSchedulePreview,
   startDesktopRecorder,
   startRecorder,
+  stopRecorder,
   startRun,
   stopDesktopRecorder,
   syncOrchestratorJob,
@@ -160,6 +161,19 @@ type RunArtifact = {
   attempt?: number;
   createdAt?: string;
   error?: string;
+};
+
+type RecorderPayloadType = "navigate" | "click" | "fill" | "change";
+type RecorderDraftNodeType = "playwright_navigate" | "playwright_click" | "playwright_fill" | "skip";
+type RecorderDraftEvent = {
+  id: string;
+  capturedAt: string;
+  type: RecorderPayloadType;
+  nodeType: RecorderDraftNodeType;
+  url: string;
+  selector: string;
+  value: string;
+  text: string;
 };
 
 type WorkflowPresence = {
@@ -309,6 +323,27 @@ function formatBytes(value: number | null | undefined) {
   return `${size.toFixed(size >= 100 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function mapRecorderPayloadToDraftEvent(payload: Record<string, unknown>): RecorderDraftEvent | null {
+  const type = String(payload?.type || "").trim() as RecorderPayloadType;
+  if (!type || !["navigate", "click", "fill", "change"].includes(type)) {
+    return null;
+  }
+
+  const nodeType: RecorderDraftNodeType =
+    type === "navigate" ? "playwright_navigate" : type === "click" ? "playwright_click" : "playwright_fill";
+  const now = new Date().toISOString();
+  return {
+    id: `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    capturedAt: now,
+    type,
+    nodeType,
+    url: String(payload?.url || ""),
+    selector: String(payload?.selector || ""),
+    value: String(payload?.value || ""),
+    text: String(payload?.text || "")
+  };
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [loginTotpCode, setLoginTotpCode] = useState("");
@@ -320,6 +355,11 @@ export default function App() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
   const [desktopRecording, setDesktopRecording] = useState(false);
+  const [webRecording, setWebRecording] = useState(false);
+  const [webRecorderReady, setWebRecorderReady] = useState(false);
+  const [webRecorderSessionId, setWebRecorderSessionId] = useState<string | null>(null);
+  const [webRecorderStartUrl, setWebRecorderStartUrl] = useState("https://example.com");
+  const [webRecorderDraftEvents, setWebRecorderDraftEvents] = useState<RecorderDraftEvent[]>([]);
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [activeRun, setActiveRun] = useState<WorkflowRunDetail | null>(null);
   const [runDiff, setRunDiff] = useState<any | null>(null);
@@ -414,6 +454,8 @@ export default function App() {
   const editorHistoryRef = useRef<EditorSnapshot[]>([]);
   const editorHistoryIndexRef = useRef(-1);
   const historyHydratingRef = useRef(false);
+  const webRecorderSocketRef = useRef<WebSocket | null>(null);
+  const webRecorderSessionIdRef = useRef<string | null>(webRecorderSessionId);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -422,6 +464,20 @@ export default function App() {
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  useEffect(() => {
+    webRecorderSessionIdRef.current = webRecorderSessionId;
+  }, [webRecorderSessionId]);
+
+  useEffect(() => {
+    return () => {
+      const socket = webRecorderSocketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
+      webRecorderSocketRef.current = null;
+    };
+  }, []);
 
   const resetEditorHistory = (snapshotNodes: Node[], snapshotEdges: Edge[]) => {
     const nodesClone = cloneNodes(snapshotNodes);
@@ -1224,6 +1280,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    const activeWebRecorderSession = webRecorderSessionIdRef.current;
+    if (activeWebRecorderSession) {
+      void stopRecorder(activeWebRecorderSession).catch(() => undefined);
+    }
+    closeWebRecorderSocket();
     clearToken();
     setToken(null);
     setActiveWorkflow(null);
@@ -1284,6 +1345,11 @@ export default function App() {
     setIsDirty(false);
     setLastAutoSaveAt(null);
     setStatus("");
+    setWebRecording(false);
+    setWebRecorderReady(false);
+    setWebRecorderSessionId(null);
+    setWebRecorderDraftEvents([]);
+    setWebRecorderStartUrl("https://example.com");
   };
 
   const handleSave = async (options?: { silent?: boolean; autosave?: boolean }) => {
@@ -1676,55 +1742,243 @@ export default function App() {
     return validationErrors;
   };
 
+  const closeWebRecorderSocket = () => {
+    const existing = webRecorderSocketRef.current;
+    if (!existing) return;
+    try {
+      existing.close();
+    } catch {
+      // ignore close errors
+    }
+    webRecorderSocketRef.current = null;
+  };
+
+  const appendWebRecorderDraftEvent = (event: RecorderDraftEvent) => {
+    setWebRecorderDraftEvents((current) => {
+      if (event.nodeType === "playwright_fill" && current.length) {
+        const last = current[current.length - 1];
+        if (last.nodeType === "playwright_fill" && last.selector === event.selector) {
+          const next = [...current];
+          next[next.length - 1] = {
+            ...last,
+            value: event.value,
+            capturedAt: event.capturedAt
+          };
+          return next;
+        }
+      }
+      return [...current, event].slice(-160);
+    });
+  };
+
   const handleStartRecorder = async () => {
-    setFeedback("Starting recorder...", "info");
-    const session = await startRecorder();
+    if (webRecording) return;
+    const rawStartUrl = webRecorderStartUrl.trim();
+    let startUrl: string | undefined;
+    if (rawStartUrl) {
+      try {
+        startUrl = new URL(rawStartUrl).toString();
+      } catch {
+        throw new Error("Recorder start URL must be a valid absolute URL.");
+      }
+    }
+
+    setFeedback("Starting web recorder...", "info");
+    const session = await startRecorder(startUrl);
+    setWebRecorderSessionId(session.sessionId);
+    setWebRecorderReady(false);
+    setWebRecording(true);
+
     const ws = new WebSocket(`${API_URL.replace("http", "ws")}${session.wsUrl}`);
-    let isReady = false;
-    let capturedEvents = 0;
+    webRecorderSocketRef.current = ws;
+
     const readyTimeout = window.setTimeout(() => {
-      if (isReady) return;
+      if (webRecorderSocketRef.current !== ws) return;
       setFeedback("Recorder did not connect in time. Check browser/Playwright availability.", "error");
-      ws.close();
-    }, 6000);
+      closeWebRecorderSocket();
+      setWebRecording(false);
+      setWebRecorderReady(false);
+      setWebRecorderSessionId(null);
+    }, 7000);
 
     ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
+      const message = JSON.parse(String(event.data || "{}"));
       if (message.type === "recorder:ready") {
-        isReady = true;
         window.clearTimeout(readyTimeout);
-        setFeedback("Recorder connected. Perform actions in the recording browser.", "success");
+        setWebRecorderReady(true);
+        setFeedback("Web recorder connected. Perform actions in the recorder browser.", "success");
         return;
       }
       if (message.type === "recorder:event") {
-        capturedEvents += 1;
-        const payload = message.payload;
-        if (payload.type === "click") {
-          handleAddNode("playwright_click", { selector: payload.selector, retryCount: 2, timeoutMs: 15000 });
-        }
-        if (payload.type === "fill") {
-          handleAddNode("playwright_fill", {
-            selector: payload.selector,
-            value: payload.value,
-            retryCount: 2,
-            timeoutMs: 15000
-          });
-        }
+        const mapped = mapRecorderPayloadToDraftEvent(
+          message?.payload && typeof message.payload === "object" ? (message.payload as Record<string, unknown>) : {}
+        );
+        if (!mapped) return;
+        appendWebRecorderDraftEvent(mapped);
       }
     };
 
-    ws.onopen = () => setFeedback("Recorder socket opened. Waiting for recorder ready signal...", "info");
+    ws.onopen = () => {
+      setFeedback("Recorder socket opened. Waiting for recorder ready signal...", "info");
+    };
+
     ws.onerror = () => {
       window.clearTimeout(readyTimeout);
-      setFeedback("Recorder error. Unable to stream events.", "error");
+      setFeedback("Recorder socket error. Stop and restart capture.", "error");
     };
+
     ws.onclose = () => {
       window.clearTimeout(readyTimeout);
-      if (!isReady) return;
-      if (!capturedEvents) {
-        setFeedback("Recorder session ended with no captured actions.", "info");
+      if (webRecorderSocketRef.current === ws) {
+        webRecorderSocketRef.current = null;
       }
+      setWebRecorderReady(false);
     };
+  };
+
+  const mergeRecordedSessionEvents = (events: Array<Record<string, unknown>>) => {
+    if (!events.length) return;
+    if (webRecorderDraftEvents.length) return;
+    const mapped = events
+      .map((payload) => mapRecorderPayloadToDraftEvent(payload))
+      .filter((entry): entry is RecorderDraftEvent => Boolean(entry));
+    if (!mapped.length) return;
+    setWebRecorderDraftEvents(mapped.slice(-160));
+  };
+
+  const handleStopRecorder = async () => {
+    const sessionId = webRecorderSessionIdRef.current;
+    closeWebRecorderSocket();
+    setWebRecorderReady(false);
+    setWebRecording(false);
+    setWebRecorderSessionId(null);
+    if (!sessionId) {
+      setFeedback("Web recorder stopped.", "info");
+      return;
+    }
+    const result = await stopRecorder(sessionId);
+    const events = Array.isArray(result?.events) ? (result.events as Array<Record<string, unknown>>) : [];
+    mergeRecordedSessionEvents(events);
+    setFeedback(`Recorder stopped. Captured ${events.length} action(s). Review and insert when ready.`, "success");
+  };
+
+  const handleToggleRecorder = async () => {
+    if (webRecording) {
+      await handleStopRecorder();
+      return;
+    }
+    await handleStartRecorder();
+  };
+
+  const handleRemoveRecordedEvent = (id: string) => {
+    setWebRecorderDraftEvents((current) => current.filter((entry) => entry.id !== id));
+  };
+
+  const handleMoveRecordedEvent = (id: string, direction: -1 | 1) => {
+    setWebRecorderDraftEvents((current) => {
+      const index = current.findIndex((entry) => entry.id === id);
+      if (index < 0) return current;
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      const [item] = next.splice(index, 1);
+      next.splice(nextIndex, 0, item);
+      return next;
+    });
+  };
+
+  const handleUpdateRecordedEvent = (id: string, patch: Partial<RecorderDraftEvent>) => {
+    setWebRecorderDraftEvents((current) =>
+      current.map((entry) => (entry.id === id ? { ...entry, ...patch, id: entry.id } : entry))
+    );
+  };
+
+  const buildRecordedNodeData = (event: RecorderDraftEvent, index: number): Record<string, unknown> => {
+    if (event.nodeType === "playwright_navigate") {
+      return {
+        label: index === 0 ? "Navigate" : `Navigate ${index + 1}`,
+        type: "playwright_navigate",
+        url: event.url || webRecorderStartUrl || "https://example.com",
+        waitUntil: "domcontentloaded",
+        retryCount: 1,
+        timeoutMs: 30000
+      };
+    }
+    if (event.nodeType === "playwright_click") {
+      return {
+        label: index === 0 ? "Click" : `Click ${index + 1}`,
+        type: "playwright_click",
+        selector: event.selector,
+        retryCount: 2,
+        timeoutMs: 15000
+      };
+    }
+    return {
+      label: index === 0 ? "Fill" : `Fill ${index + 1}`,
+      type: "playwright_fill",
+      selector: event.selector,
+      value: event.value,
+      retryCount: 2,
+      timeoutMs: 15000
+    };
+  };
+
+  const handleInsertRecordedSequence = () => {
+    const actionable = webRecorderDraftEvents.filter((entry) => entry.nodeType !== "skip");
+    if (!actionable.length) {
+      setFeedback("Recorder draft is empty. Capture actions first.", "error");
+      return;
+    }
+
+    const existingNodes = nodesRef.current;
+    const anchorNode = selectedNode || existingNodes[existingNodes.length - 1] || null;
+    const basePosition = anchorNode
+      ? {
+          x: (anchorNode.position?.x || 80) + 250,
+          y: anchorNode.position?.y || 80
+        }
+      : findNextNodePosition(existingNodes);
+
+    const timestamp = Date.now();
+    const newNodes: Node[] = actionable.map((event, index) => ({
+      id: `${event.nodeType}-rec-${timestamp}-${index}`,
+      type: "action",
+      position: {
+        x: basePosition.x + index * 250,
+        y: basePosition.y
+      },
+      data: buildRecordedNodeData(event, index)
+    }));
+
+    if (!newNodes.length) {
+      setFeedback("No actionable recorder events to insert.", "error");
+      return;
+    }
+
+    const newEdges: Edge[] = [];
+    if (anchorNode) {
+      newEdges.push({
+        id: `e-${anchorNode.id}-${newNodes[0].id}`,
+        source: anchorNode.id,
+        target: newNodes[0].id
+      });
+    }
+    for (let index = 1; index < newNodes.length; index += 1) {
+      const prev = newNodes[index - 1];
+      const current = newNodes[index];
+      newEdges.push({
+        id: `e-${prev.id}-${current.id}`,
+        source: prev.id,
+        target: current.id
+      });
+    }
+
+    setNodes((current) => [...current, ...newNodes]);
+    setEdges((current) => [...current, ...newEdges]);
+    setSelectedNode(newNodes[newNodes.length - 1]);
+    setSelectedEdgeId(null);
+    setWebRecorderDraftEvents([]);
+    setFeedback(`Inserted ${newNodes.length} recorded step(s) into the workflow.`, "success");
   };
 
   const handleDesktopRecordStart = async () => {
@@ -3073,7 +3327,8 @@ export default function App() {
           onQuickAddFirstNode={handleQuickAddFirstNode}
           onQuickAddNode={handleQuickAddNode}
           isActionLoading={isActionLoading}
-          onRecordWeb={() => withActionLoading("record-web", handleStartRecorder)}
+          onRecordWeb={() => withActionLoading("record-web", handleToggleRecorder)}
+          webRecording={webRecording}
           onRecordDesktop={() =>
             withActionLoading("record-desktop", () => (desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()))
           }
@@ -3096,6 +3351,106 @@ export default function App() {
           isDirty={isDirty}
           lastAutoSaveAt={lastAutoSaveAt}
         />
+
+        {webRecording || webRecorderDraftEvents.length ? (
+          <div className="recorder-review-panel">
+            <div className="recorder-review-head">
+              <strong>Web Recorder Draft</strong>
+              <small>
+                {webRecording
+                  ? webRecorderReady
+                    ? `Recording live (${webRecorderDraftEvents.length} events captured)`
+                    : "Connecting recorder..."
+                  : `${webRecorderDraftEvents.length} captured events ready for review`}
+              </small>
+            </div>
+            <div className="recorder-review-controls">
+              <input
+                value={webRecorderStartUrl}
+                onChange={(event) => setWebRecorderStartUrl(event.target.value)}
+                placeholder="Recorder start URL (optional)"
+              />
+              <button
+                disabled={isActionLoading("record-web")}
+                className={isActionLoading("record-web") ? "is-loading" : ""}
+                onClick={() => withActionLoading("record-web", handleToggleRecorder)}
+              >
+                {webRecording ? "Stop Capture" : "Start Capture"}
+              </button>
+              <button
+                disabled={!webRecorderDraftEvents.length || webRecording}
+                onClick={() => setWebRecorderDraftEvents([])}
+              >
+                Clear
+              </button>
+              <button
+                disabled={!webRecorderDraftEvents.length || webRecording || isActionLoading("apply-recorder")}
+                className={isActionLoading("apply-recorder") ? "is-loading" : ""}
+                onClick={() => withActionLoading("apply-recorder", () => Promise.resolve(handleInsertRecordedSequence()))}
+              >
+                {isActionLoading("apply-recorder") ? "Inserting..." : "Insert Sequence"}
+              </button>
+            </div>
+            <div className="recorder-review-list">
+              {webRecorderDraftEvents.map((event, index) => (
+                <div key={event.id} className="recorder-review-item">
+                  <div className="recorder-review-meta">
+                    <strong>#{index + 1}</strong>
+                    <small>{event.type}</small>
+                    <small>{new Date(event.capturedAt).toLocaleTimeString()}</small>
+                  </div>
+                  <select
+                    value={event.nodeType}
+                    onChange={(valueEvent) =>
+                      handleUpdateRecordedEvent(event.id, { nodeType: valueEvent.target.value as RecorderDraftNodeType })
+                    }
+                  >
+                    <option value="playwright_navigate">Navigate</option>
+                    <option value="playwright_click">Click</option>
+                    <option value="playwright_fill">Fill</option>
+                    <option value="skip">Skip</option>
+                  </select>
+                  {event.nodeType === "playwright_navigate" ? (
+                    <input
+                      value={event.url}
+                      onChange={(valueEvent) => handleUpdateRecordedEvent(event.id, { url: valueEvent.target.value })}
+                      placeholder="https://example.com/page"
+                    />
+                  ) : null}
+                  {event.nodeType === "playwright_click" || event.nodeType === "playwright_fill" ? (
+                    <input
+                      value={event.selector}
+                      onChange={(valueEvent) => handleUpdateRecordedEvent(event.id, { selector: valueEvent.target.value })}
+                      placeholder="CSS selector"
+                    />
+                  ) : null}
+                  {event.nodeType === "playwright_fill" ? (
+                    <input
+                      value={event.value}
+                      onChange={(valueEvent) => handleUpdateRecordedEvent(event.id, { value: valueEvent.target.value })}
+                      placeholder="Input value"
+                    />
+                  ) : null}
+                  <div className="recorder-review-actions">
+                    <button onClick={() => handleMoveRecordedEvent(event.id, -1)} disabled={index === 0}>
+                      Up
+                    </button>
+                    <button
+                      onClick={() => handleMoveRecordedEvent(event.id, 1)}
+                      disabled={index === webRecorderDraftEvents.length - 1}
+                    >
+                      Down
+                    </button>
+                    <button className="danger" onClick={() => handleRemoveRecordedEvent(event.id)}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!webRecorderDraftEvents.length ? <small>No recorded events yet. Start capture to build a draft.</small> : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="metrics-strip">
           <div className="metric-card">

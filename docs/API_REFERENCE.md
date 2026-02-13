@@ -167,6 +167,7 @@ Base URL (local): `http://localhost:8080`
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | POST | `/api/recorders/web/start` | `workflows:write` | Starts web recorder session |
+| POST | `/api/recorders/web/stop` | `workflows:write` | Stops web recorder session and returns captured events |
 | POST | `/api/recorders/desktop/start` | `workflows:write` | Starts desktop recorder session |
 | POST | `/api/recorders/desktop/stop` | `workflows:write` | Stops desktop recorder session |
 
