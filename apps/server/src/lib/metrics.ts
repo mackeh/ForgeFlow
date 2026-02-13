@@ -36,8 +36,13 @@ function localHourKey(date: Date, timezone: string) {
   }).format(date);
 }
 
-export function buildDashboardMetrics(runs: RunLike[], timezone: string, days: number) {
-  const now = new Date();
+export function buildDashboardMetrics(
+  runs: RunLike[],
+  timezone: string,
+  days: number,
+  referenceNow?: Date | string | null
+) {
+  const now = asDate(referenceNow || null) || new Date();
   const start = new Date(now.getTime() - Math.max(1, days) * 24 * 60 * 60 * 1000);
   const inWindow = runs.filter((run) => {
     const created = asDate(run.createdAt);

@@ -35,7 +35,7 @@ test("buildDashboardMetrics computes summary, daily and top failures", () => {
     }
   ];
 
-  const metrics = buildDashboardMetrics(runs as any, "UTC", 2);
+  const metrics = buildDashboardMetrics(runs as any, "UTC", 2, now);
   assert.equal(metrics.summary.totalRuns, 3);
   assert.equal(metrics.summary.succeeded, 1);
   assert.equal(metrics.summary.failed, 1);

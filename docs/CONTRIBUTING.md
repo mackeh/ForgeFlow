@@ -92,6 +92,7 @@ When adding features:
 Before submitting:
 - [ ] Login/logout flow works.
 - [ ] Workflow create/edit/save/publish works.
+- [ ] Duplicate selected node works (`Ctrl+D` and toolbar button).
 - [ ] Test run and production run both work.
 - [ ] Approval/resume behavior works for `manual_approval`.
 - [ ] Run diagnostics logs/artifacts render correctly.

@@ -43,6 +43,7 @@ Shortcuts:
 - `Ctrl+S` save draft
 - `Ctrl+T` test run
 - `Ctrl+R` run published
+- `Ctrl+D` duplicate selected node
 - `Delete` remove selected node
 - `Space` auto layout
 

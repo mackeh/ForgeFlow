@@ -784,6 +784,11 @@ export default function App() {
         void withActionLoading("test-run", () => runWorkflow(true));
         return;
       }
+      if (hasCmd && key === "d") {
+        event.preventDefault();
+        handleDuplicateSelectedNode();
+        return;
+      }
       if (key === "delete" || key === "backspace") {
         event.preventDefault();
         handleDeleteSelectedNode();
@@ -1218,6 +1223,38 @@ export default function App() {
 
     setStatus(`Added node: ${newNode.data?.label || type}`);
     return id;
+  };
+
+  const handleDuplicateSelectedNode = () => {
+    if (!selectedNode) return;
+    const selectedType = String(selectedNode.data?.type || "");
+    if (selectedType === "start") {
+      setFeedback("Start node cannot be duplicated", "error");
+      return;
+    }
+
+    const id = `${selectedType || "node"}-copy-${Date.now()}`;
+    const duplicatedData = JSON.parse(JSON.stringify(selectedNode.data || {})) as Record<string, unknown>;
+    const baseLabel = String(duplicatedData.label || selectedType || "node").trim() || "node";
+    duplicatedData.label = /\(copy\)$/i.test(baseLabel) ? baseLabel : `${baseLabel} (copy)`;
+
+    const basePosition = {
+      x: (selectedNode.position?.x || 0) + 260,
+      y: (selectedNode.position?.y || 0) + 40
+    };
+    const position = resolveFreeNodePosition(basePosition, nodesRef.current);
+
+    const newNode: Node = {
+      id,
+      type: "action",
+      position,
+      data: duplicatedData
+    };
+
+    nodesRef.current = [...nodesRef.current, newNode];
+    setNodes((current) => [...current, newNode]);
+    setSelectedNode(newNode);
+    setFeedback(`Duplicated node ${selectedNode.id}`, "success");
   };
 
   const handleDeleteSelectedNode = () => {
@@ -2470,6 +2507,12 @@ export default function App() {
               onClick={() => withActionLoading("auto-layout", autoLayoutNodes)}
             >
               Auto Layout
+            </button>
+            <button
+              disabled={!selectedNode || String(selectedNode.data?.type || "") === "start"}
+              onClick={handleDuplicateSelectedNode}
+            >
+              Duplicate Node
             </button>
             <button onClick={() => setSnapToGrid((value) => !value)}>{snapToGrid ? "Snap: On" : "Snap: Off"}</button>
             <button
