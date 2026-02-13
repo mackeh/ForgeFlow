@@ -47,6 +47,20 @@ Expected outcome:
 - Normalized data is copied to target key.
 - Context inspector shows extracted + transferred values.
 
+## Demo 4: Workflow Builder MVP Controls
+Goal: Validate the core drag-and-drop builder flow and persistence.
+
+1. Create/select a workflow and add 3+ nodes from quick-add.
+2. Connect nodes on canvas using edge handles.
+3. Select an edge and remove it (`Delete` or `More > Disconnect Edge`).
+4. Move or delete a node, then run `Undo` and `Redo`.
+5. Export with `Save Workflow File`, then import with `Load Workflow File`.
+
+Expected outcome:
+- Editor supports incremental design changes with reversible history.
+- Edge disconnect works without deleting nodes.
+- Exported files include workflow schema metadata and can be re-imported.
+
 ## Demo Assets
 - Template source: `apps/server/src/lib/templates.ts`
 - Node catalog: `apps/web/src/lib/nodeCatalog.ts`
@@ -56,5 +70,6 @@ Expected outcome:
 - Demo 1: 5-7 minutes
 - Demo 2: 4-6 minutes
 - Demo 3: 4-5 minutes
+- Demo 4: 4-6 minutes
 
-Total: 15-18 minutes for a full product walkthrough.
+Total: 19-24 minutes for a full product walkthrough.

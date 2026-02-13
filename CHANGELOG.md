@@ -10,9 +10,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 - Release automation workflow (`.github/workflows/release.yml`) for tag-driven publishing.
 - Semver tag helper script (`scripts/release-version.sh`) with `patch`, `minor`, `major` bump modes.
+- Workflow file export schema metadata (`schema`, `version`) with backward-compatible import checks.
+- Workflow builder controls for undo/redo and explicit edge disconnect.
 
 ### Changed
 - CI now includes browser smoke validation (`Web E2E Smoke`).
+- Web editor keyboard shortcuts now include undo/redo and selection-aware delete behavior.
 
 ## [1.0.7] - 2026-02-13
 

@@ -17,8 +17,14 @@ test("quick-add input Enter triggers add-first action", () => {
       onRecordDesktop={() => undefined}
       desktopRecording={false}
       onAutoLayout={() => undefined}
+      onUndo={() => undefined}
+      onRedo={() => undefined}
+      canUndo={false}
+      canRedo={false}
       onDuplicateSelectedNode={() => undefined}
       canDuplicateSelectedNode={false}
+      onDisconnectSelectedEdge={() => undefined}
+      canDisconnectSelectedEdge={false}
       snapToGrid={true}
       onToggleSnap={() => undefined}
       onSaveDraft={() => undefined}
@@ -47,8 +53,14 @@ test("toolbar shows dirty draft status", () => {
       onRecordDesktop={() => undefined}
       desktopRecording={false}
       onAutoLayout={() => undefined}
+      onUndo={() => undefined}
+      onRedo={() => undefined}
+      canUndo={false}
+      canRedo={false}
       onDuplicateSelectedNode={() => undefined}
       canDuplicateSelectedNode={false}
+      onDisconnectSelectedEdge={() => undefined}
+      canDisconnectSelectedEdge={false}
       snapToGrid={true}
       onToggleSnap={() => undefined}
       onSaveDraft={() => undefined}
@@ -60,4 +72,44 @@ test("toolbar shows dirty draft status", () => {
     />
   );
   expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+});
+
+test("toolbar triggers undo and redo actions", () => {
+  const onUndo = vi.fn();
+  const onRedo = vi.fn();
+  render(
+    <CanvasToolbar
+      nodeSearch=""
+      onNodeSearchChange={() => undefined}
+      quickAddInputRef={createRef<HTMLInputElement>()}
+      filteredNodeOptions={[{ label: "HTTP Request", type: "http_request", category: "Core" }]}
+      onQuickAddFirstNode={() => undefined}
+      onQuickAddNode={() => undefined}
+      isActionLoading={() => false}
+      onRecordWeb={() => undefined}
+      onRecordDesktop={() => undefined}
+      desktopRecording={false}
+      onAutoLayout={() => undefined}
+      onUndo={onUndo}
+      onRedo={onRedo}
+      canUndo={true}
+      canRedo={true}
+      onDuplicateSelectedNode={() => undefined}
+      canDuplicateSelectedNode={false}
+      onDisconnectSelectedEdge={() => undefined}
+      canDisconnectSelectedEdge={false}
+      snapToGrid={true}
+      onToggleSnap={() => undefined}
+      onSaveDraft={() => undefined}
+      onPublish={() => undefined}
+      onTestRun={() => undefined}
+      onRun={() => undefined}
+      isDirty={false}
+      lastAutoSaveAt={null}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+  expect(onUndo).toHaveBeenCalledTimes(1);
+  expect(onRedo).toHaveBeenCalledTimes(1);
 });

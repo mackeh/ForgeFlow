@@ -13,8 +13,14 @@ type CanvasToolbarProps = {
   onRecordDesktop: () => void;
   desktopRecording: boolean;
   onAutoLayout: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   onDuplicateSelectedNode: () => void;
   canDuplicateSelectedNode: boolean;
+  onDisconnectSelectedEdge: () => void;
+  canDisconnectSelectedEdge: boolean;
   snapToGrid: boolean;
   onToggleSnap: () => void;
   onSaveDraft: () => void;
@@ -37,8 +43,14 @@ export function CanvasToolbar({
   onRecordDesktop,
   desktopRecording,
   onAutoLayout,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   onDuplicateSelectedNode,
   canDuplicateSelectedNode,
+  onDisconnectSelectedEdge,
+  canDisconnectSelectedEdge,
   snapToGrid,
   onToggleSnap,
   onSaveDraft,
@@ -88,6 +100,12 @@ export function CanvasToolbar({
         </div>
       </div>
       <div className="toolbar-right">
+        <button disabled={!canUndo} onClick={onUndo} title="Undo (Ctrl/Cmd+Z)">
+          Undo
+        </button>
+        <button disabled={!canRedo} onClick={onRedo} title="Redo (Ctrl/Cmd+Shift+Z)">
+          Redo
+        </button>
         <span className={`draft-state ${isDirty ? "dirty" : "saved"}`} title={lastAutoSaveAt ? `Last autosave: ${lastAutoSaveAt}` : undefined}>
           {isDirty ? "Unsaved changes" : "Saved"}
         </span>
@@ -117,6 +135,9 @@ export function CanvasToolbar({
             </button>
             <button disabled={!canDuplicateSelectedNode} onClick={onDuplicateSelectedNode}>
               Duplicate Node
+            </button>
+            <button disabled={!canDisconnectSelectedEdge} onClick={onDisconnectSelectedEdge}>
+              Disconnect Edge
             </button>
             <button onClick={onToggleSnap}>{snapToGrid ? "Snap: On" : "Snap: Off"}</button>
           </div>

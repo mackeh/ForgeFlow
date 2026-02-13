@@ -6,6 +6,8 @@ type UseGlobalHotkeysParams = {
   onRun: () => void;
   onTestRun: () => void;
   onFocusQuickAdd: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onAutoLayout: () => void;
@@ -29,6 +31,8 @@ export function useGlobalHotkeys({
   onRun,
   onTestRun,
   onFocusQuickAdd,
+  onUndo,
+  onRedo,
   onDuplicate,
   onDelete,
   onAutoLayout
@@ -61,12 +65,27 @@ export function useGlobalHotkeys({
         onFocusQuickAdd();
         return;
       }
+      if (hasCmd && key === "z" && event.shiftKey) {
+        event.preventDefault();
+        onRedo();
+        return;
+      }
+      if (hasCmd && key === "z") {
+        event.preventDefault();
+        onUndo();
+        return;
+      }
+      if (hasCmd && key === "y") {
+        event.preventDefault();
+        onRedo();
+        return;
+      }
       if (hasCmd && key === "d") {
         event.preventDefault();
         onDuplicate();
         return;
       }
-      if (key === "delete" || key === "backspace") {
+      if (!hasCmd && (key === "delete" || key === "backspace")) {
         event.preventDefault();
         onDelete();
         return;
@@ -81,5 +100,5 @@ export function useGlobalHotkeys({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [enabled, onSave, onRun, onTestRun, onFocusQuickAdd, onDuplicate, onDelete, onAutoLayout]);
+  }, [enabled, onSave, onRun, onTestRun, onFocusQuickAdd, onUndo, onRedo, onDuplicate, onDelete, onAutoLayout]);
 }

@@ -237,6 +237,52 @@ const defaultDefinition: WorkflowDefinition = {
   }
 };
 
+const WORKFLOW_FILE_SCHEMA = "forgeflow.workflow";
+const WORKFLOW_FILE_VERSION = 1;
+const MAX_EDITOR_HISTORY = 80;
+
+type EditorSnapshot = {
+  nodes: Node[];
+  edges: Edge[];
+  hash: string;
+};
+
+function cloneNodes(source: Node[]): Node[] {
+  const normalized = source.map((node) => {
+    const next = { ...node } as Record<string, unknown>;
+    const data =
+      next.data && typeof next.data === "object" ? { ...(next.data as Record<string, unknown>) } : undefined;
+    if (data) {
+      delete data.__runStatus;
+      delete data.__runDurationMs;
+      delete data.__runStartedAt;
+      delete data.__runAttempts;
+      delete data.__runError;
+      next.data = data;
+    }
+    delete next.selected;
+    delete next.dragging;
+    delete next.positionAbsolute;
+    delete next.width;
+    delete next.height;
+    return next;
+  });
+  return JSON.parse(JSON.stringify(normalized)) as Node[];
+}
+
+function cloneEdges(source: Edge[]): Edge[] {
+  const normalized = source.map((edge) => {
+    const next = { ...edge } as Record<string, unknown>;
+    delete next.selected;
+    return next;
+  });
+  return JSON.parse(JSON.stringify(normalized)) as Edge[];
+}
+
+function buildSnapshotHash(nodes: Node[], edges: Edge[]) {
+  return JSON.stringify({ nodes, edges });
+}
+
 function artifactPathToUrl(apiUrl: string, artifactPath?: string) {
   if (!artifactPath) return null;
   const normalized = artifactPath.replace(/\\/g, "/");
@@ -271,6 +317,7 @@ export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(defaultDefinition.nodes as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState(defaultDefinition.edges as Edge[]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("");
   const [desktopRecording, setDesktopRecording] = useState(false);
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
@@ -344,6 +391,7 @@ export default function App() {
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
   const [lastAutoSaveAt, setLastAutoSaveAt] = useState<string | null>(null);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [collabPresence, setCollabPresence] = useState<WorkflowPresence[]>([]);
   const [workflowComments, setWorkflowComments] = useState<WorkflowComment[]>([]);
   const [workflowHistory, setWorkflowHistory] = useState<WorkflowHistory | null>(null);
@@ -363,6 +411,9 @@ export default function App() {
   const collabHeartbeatRef = useRef<number | null>(null);
   const lastSavedHashRef = useRef("");
   const autosaveInFlightRef = useRef(false);
+  const editorHistoryRef = useRef<EditorSnapshot[]>([]);
+  const editorHistoryIndexRef = useRef(-1);
+  const historyHydratingRef = useRef(false);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -371,6 +422,101 @@ export default function App() {
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  const resetEditorHistory = (snapshotNodes: Node[], snapshotEdges: Edge[]) => {
+    const nodesClone = cloneNodes(snapshotNodes);
+    const edgesClone = cloneEdges(snapshotEdges);
+    editorHistoryRef.current = [
+      {
+        nodes: nodesClone,
+        edges: edgesClone,
+        hash: buildSnapshotHash(nodesClone, edgesClone)
+      }
+    ];
+    editorHistoryIndexRef.current = 0;
+    historyHydratingRef.current = false;
+    setHistoryRevision((value) => value + 1);
+  };
+
+  const captureEditorSnapshot = (snapshotNodes: Node[], snapshotEdges: Edge[]) => {
+    if (historyHydratingRef.current) {
+      historyHydratingRef.current = false;
+      return;
+    }
+
+    const nodesClone = cloneNodes(snapshotNodes);
+    const edgesClone = cloneEdges(snapshotEdges);
+    const hash = buildSnapshotHash(nodesClone, edgesClone);
+    const currentIndex = editorHistoryIndexRef.current;
+    const currentSnapshot = currentIndex >= 0 ? editorHistoryRef.current[currentIndex] : null;
+    if (currentSnapshot?.hash === hash) return;
+
+    const trimmed = editorHistoryRef.current.slice(0, Math.max(0, currentIndex + 1));
+    trimmed.push({ nodes: nodesClone, edges: edgesClone, hash });
+    const overflow = Math.max(0, trimmed.length - MAX_EDITOR_HISTORY);
+    editorHistoryRef.current = overflow > 0 ? trimmed.slice(overflow) : trimmed;
+    editorHistoryIndexRef.current = editorHistoryRef.current.length - 1;
+    setHistoryRevision((value) => value + 1);
+  };
+
+  const hydrateEditorSnapshot = (snapshot: EditorSnapshot) => {
+    historyHydratingRef.current = true;
+    const nodesClone = cloneNodes(snapshot.nodes);
+    const edgesClone = cloneEdges(snapshot.edges);
+    setNodes(nodesClone);
+    setEdges(edgesClone);
+    setSelectedNode((current) => {
+      if (!current) return null;
+      return nodesClone.find((node) => node.id === current.id) || null;
+    });
+    setSelectedEdgeId((current) => {
+      if (!current) return null;
+      return edgesClone.some((edge) => edge.id === current) ? current : null;
+    });
+  };
+
+  const handleUndo = () => {
+    const currentIndex = editorHistoryIndexRef.current;
+    if (currentIndex <= 0) return;
+    const nextIndex = currentIndex - 1;
+    editorHistoryIndexRef.current = nextIndex;
+    setHistoryRevision((value) => value + 1);
+    const snapshot = editorHistoryRef.current[nextIndex];
+    if (snapshot) {
+      hydrateEditorSnapshot(snapshot);
+      setStatus("Undo");
+    }
+  };
+
+  const handleRedo = () => {
+    const currentIndex = editorHistoryIndexRef.current;
+    if (currentIndex < 0 || currentIndex >= editorHistoryRef.current.length - 1) return;
+    const nextIndex = currentIndex + 1;
+    editorHistoryIndexRef.current = nextIndex;
+    setHistoryRevision((value) => value + 1);
+    const snapshot = editorHistoryRef.current[nextIndex];
+    if (snapshot) {
+      hydrateEditorSnapshot(snapshot);
+      setStatus("Redo");
+    }
+  };
+
+  const canUndo = useMemo(() => editorHistoryIndexRef.current > 0, [historyRevision]);
+  const canRedo = useMemo(
+    () => editorHistoryIndexRef.current >= 0 && editorHistoryIndexRef.current < editorHistoryRef.current.length - 1,
+    [historyRevision]
+  );
+
+  useEffect(() => {
+    captureEditorSnapshot(nodes, edges);
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!selectedEdgeId) return;
+    if (!edges.some((edge) => edge.id === selectedEdgeId)) {
+      setSelectedEdgeId(null);
+    }
+  }, [edges, selectedEdgeId]);
 
   const nodeOptions = NODE_OPTIONS;
 
@@ -982,8 +1128,13 @@ export default function App() {
       "definition" in workflow || "draftDefinition" in workflow ? (workflow as WorkflowRecord) : await getWorkflow(workflow.id);
     setActiveWorkflow(fullWorkflow);
     const def = fullWorkflow.draftDefinition || fullWorkflow.definition || defaultDefinition;
-    setNodes(def.nodes || defaultDefinition.nodes);
-    setEdges(def.edges || []);
+    const nextNodes = (def.nodes || defaultDefinition.nodes) as Node[];
+    const nextEdges = (def.edges || []) as Edge[];
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setSelectedNode(null);
+    setSelectedEdgeId(null);
+    resetEditorHistory(nextNodes, nextEdges);
     lastSavedHashRef.current = hashDefinition(
       buildPersistedDefinition(defaultDefinition, def, (def.nodes || defaultDefinition.nodes) as Node[], (def.edges || []) as Edge[])
     );
@@ -994,6 +1145,7 @@ export default function App() {
 
   const onConnect = (connection: Connection) => {
     setEdges((eds) => addEdge(connection, eds));
+    setSelectedEdgeId(null);
   };
 
   const handleLogin = async (username: string, password: string, totpCode?: string) => {
@@ -1123,8 +1275,11 @@ export default function App() {
     setTwoFactorSetup(null);
     setTwoFactorToken("");
     setLoginTotpCode("");
+    setSelectedNode(null);
+    setSelectedEdgeId(null);
     setNodes(defaultDefinition.nodes as Node[]);
     setEdges(defaultDefinition.edges as Edge[]);
+    resetEditorHistory(defaultDefinition.nodes as Node[], defaultDefinition.edges as Edge[]);
     lastSavedHashRef.current = "";
     setIsDirty(false);
     setLastAutoSaveAt(null);
@@ -1294,6 +1449,7 @@ export default function App() {
     nodesRef.current = [...nodesRef.current, newNode];
     setNodes((nds) => [...nds, newNode]);
     setSelectedNode(newNode);
+    setSelectedEdgeId(null);
 
     if (sourceNode) {
       setEdges((eds) => [...eds, { id: `e-${sourceNode.id}-${id}`, source: sourceNode.id, target: id }]);
@@ -1353,6 +1509,7 @@ export default function App() {
     nodesRef.current = [...nodesRef.current, newNode];
     setNodes((current) => [...current, newNode]);
     setSelectedNode(newNode);
+    setSelectedEdgeId(null);
     setFeedback(`Duplicated node ${selectedNode.id}`, "success");
   };
 
@@ -1366,7 +1523,23 @@ export default function App() {
     setNodes((current) => current.filter((node) => node.id !== selectedNode.id));
     setEdges((current) => current.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id));
     setSelectedNode(null);
+    setSelectedEdgeId(null);
     setFeedback(`Deleted node ${selectedNode.id}`, "info");
+  };
+
+  const handleDisconnectSelectedEdge = () => {
+    if (!selectedEdgeId) return;
+    setEdges((current) => current.filter((edge) => edge.id !== selectedEdgeId));
+    setSelectedEdgeId(null);
+    setFeedback(`Disconnected edge ${selectedEdgeId}`, "info");
+  };
+
+  const handleDeleteSelection = () => {
+    if (selectedEdgeId) {
+      handleDisconnectSelectedEdge();
+      return;
+    }
+    handleDeleteSelectedNode();
   };
 
   const validateWorkflowDefinition = (definition: WorkflowDefinition) => {
@@ -1925,8 +2098,11 @@ export default function App() {
     if (!ok) return;
     await deleteWorkflow(activeWorkflow.id);
     setActiveWorkflow(null);
+    setSelectedNode(null);
+    setSelectedEdgeId(null);
     setNodes(defaultDefinition.nodes as Node[]);
     setEdges(defaultDefinition.edges as Edge[]);
+    resetEditorHistory(defaultDefinition.nodes as Node[], defaultDefinition.edges as Edge[]);
     setRuns([]);
     setActiveRun(null);
     setRunDiff(null);
@@ -2038,6 +2214,8 @@ export default function App() {
       return;
     }
     const payload = {
+      schema: WORKFLOW_FILE_SCHEMA,
+      version: WORKFLOW_FILE_VERSION,
       name: workflowName.trim() || activeWorkflow.name,
       definition: buildCurrentDefinition(),
       exportedAt: new Date().toISOString()
@@ -2064,6 +2242,16 @@ export default function App() {
     if (!file) return;
     const raw = await file.text();
     const parsed = JSON.parse(raw);
+    const schema = typeof parsed?.schema === "string" ? parsed.schema : "";
+    const version = Number(parsed?.version);
+    if (schema && schema !== WORKFLOW_FILE_SCHEMA) {
+      throw new Error(`Unsupported workflow file schema: ${schema}`);
+    }
+    if (schema && Number.isFinite(version) && version > WORKFLOW_FILE_VERSION) {
+      throw new Error(
+        `Workflow file version ${version} is newer than this app supports (max ${WORKFLOW_FILE_VERSION}).`
+      );
+    }
     const definition = parsed?.definition ?? parsed;
     const validDefinition =
       definition && typeof definition === "object" && Array.isArray(definition.nodes) && Array.isArray(definition.edges);
@@ -2075,7 +2263,9 @@ export default function App() {
     const created = await createWorkflow({ name: importedName, definition });
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
-    setFeedback(`Workflow loaded from ${file.name}`, "success");
+    const versionSuffix =
+      schema && Number.isFinite(version) ? ` (schema v${Math.trunc(version)})` : " (legacy format)";
+    setFeedback(`Workflow loaded from ${file.name}${versionSuffix}`, "success");
   };
 
   const isBusyForAutosave =
@@ -2127,8 +2317,10 @@ export default function App() {
       quickAddInputRef.current?.focus();
       quickAddInputRef.current?.select();
     },
+    onUndo: handleUndo,
+    onRedo: handleRedo,
     onDuplicate: handleDuplicateSelectedNode,
-    onDelete: handleDeleteSelectedNode,
+    onDelete: handleDeleteSelection,
     onAutoLayout: () => {
       void withActionLoading("auto-layout", autoLayoutNodes);
     }
@@ -2887,8 +3079,14 @@ export default function App() {
           }
           desktopRecording={desktopRecording}
           onAutoLayout={() => withActionLoading("auto-layout", autoLayoutNodes)}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
           onDuplicateSelectedNode={handleDuplicateSelectedNode}
           canDuplicateSelectedNode={Boolean(selectedNode) && String(selectedNode?.data?.type || "") !== "start"}
+          onDisconnectSelectedEdge={handleDisconnectSelectedEdge}
+          canDisconnectSelectedEdge={Boolean(selectedEdgeId)}
           snapToGrid={snapToGrid}
           onToggleSnap={() => setSnapToGrid((value) => !value)}
           onSaveDraft={() => withActionLoading("save-draft", () => handleSave())}
@@ -3015,6 +3213,10 @@ export default function App() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={(_, node) => setSelectedNode(node)}
+          onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => {
+            setSelectedNode(selectedNodes[0] || null);
+            setSelectedEdgeId(selectedEdges[0]?.id || null);
+          }}
           onInit={(instance) => {
             reactFlowRef.current = instance;
           }}
