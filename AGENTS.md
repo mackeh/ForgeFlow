@@ -18,6 +18,7 @@
   - `cd apps/server && npm install && npm run dev`
   - `cd apps/web && npm install && npm run dev`
   - `cd apps/agent && pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 7001`
+- UI power-use shortcuts: `Ctrl/Cmd+K` quick-add search, `Ctrl+S` save draft, `Ctrl+T` test run, `Ctrl+R` run, `Ctrl+D` duplicate node.
 
 ## Coding Style & Naming Conventions
 - TypeScript uses ESM modules, explicit types, and 2-space indentation.

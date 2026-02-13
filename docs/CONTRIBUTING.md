@@ -92,6 +92,7 @@ When adding features:
 Before submitting:
 - [ ] Login/logout flow works.
 - [ ] Workflow create/edit/save/publish works.
+- [ ] Quick-add node search works (`Ctrl/Cmd+K`, type, `Enter`).
 - [ ] Duplicate selected node works (`Ctrl+D` and toolbar button).
 - [ ] Test run and production run both work.
 - [ ] Approval/resume behavior works for `manual_approval`.

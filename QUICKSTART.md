@@ -27,7 +27,7 @@ Expected: `"ready": true`
 
 ## 3. Create a Workflow
 1. Click `New`.
-2. Add nodes from the top toolbar.
+2. Add nodes from the top toolbar using quick-add search (`Ctrl/Cmd+K`, type, `Enter`).
 3. Select each node and configure it in `Inspector`.
 4. Click `Save Draft`.
 
@@ -43,6 +43,7 @@ Shortcuts:
 - `Ctrl+S` save draft
 - `Ctrl+T` test run
 - `Ctrl+R` run published
+- `Ctrl/Cmd+K` focus quick-add node search
 - `Ctrl+D` duplicate selected node
 - `Delete` remove selected node
 - `Space` auto layout

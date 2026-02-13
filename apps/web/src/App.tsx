@@ -81,6 +81,12 @@ import { Inspector } from "./components/Inspector";
 import type { WorkflowDefinition, WorkflowRecord, WorkflowRunDetail, WorkflowRunSummary, WorkflowSummary, WorkflowVersion } from "./types";
 
 const nodeTypes = { action: ActionNode };
+type NodeOption = {
+  label: string;
+  type: string;
+  category: "Core" | "Control" | "Data" | "Web" | "Desktop";
+  aliases?: string[];
+};
 type ToastLevel = "info" | "success" | "error";
 type ToastAction = {
   label: string;
@@ -258,6 +264,7 @@ export default function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateWorkflowName, setTemplateWorkflowName] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
+  const [nodeSearch, setNodeSearch] = useState("");
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState("all");
   const [schedules, setSchedules] = useState<any[]>([]);
   const [integrations, setIntegrations] = useState<IntegrationItem[]>([]);
@@ -311,6 +318,7 @@ export default function App() {
   const edgesRef = useRef<Edge[]>(edges);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const quickAddInputRef = useRef<HTMLInputElement | null>(null);
   const toastIdRef = useRef(1);
   const logIdRef = useRef(1);
   const collabSocketRef = useRef<WebSocket | null>(null);
@@ -324,31 +332,49 @@ export default function App() {
     edgesRef.current = edges;
   }, [edges]);
 
-  const nodeOptions = useMemo(
+  const nodeOptions = useMemo<NodeOption[]>(
     () => [
-      { label: "HTTP Request", type: "http_request" },
-      { label: "Set Variable", type: "set_variable" },
-      { label: "LLM Clean", type: "transform_llm" },
-      { label: "Validate Record", type: "validate_record" },
-      { label: "Submit Guard", type: "submit_guard" },
-      { label: "Manual Approval", type: "manual_approval" },
-      { label: "Conditional Branch", type: "conditional_branch" },
-      { label: "Loop Iterate", type: "loop_iterate" },
-      { label: "Parallel Execute", type: "parallel_execute" },
-      { label: "CSV Import", type: "data_import_csv" },
-      { label: "Integration Request", type: "integration_request" },
-      { label: "Web Navigate", type: "playwright_navigate" },
-      { label: "Web Click", type: "playwright_click" },
-      { label: "Web Fill", type: "playwright_fill" },
-      { label: "Web Extract", type: "playwright_extract" },
-      { label: "Web Visual Assert", type: "playwright_visual_assert" },
-      { label: "Desktop Click", type: "desktop_click" },
-      { label: "Desktop Click Image", type: "desktop_click_image" },
-      { label: "Desktop Type", type: "desktop_type" },
-      { label: "Desktop Wait Image", type: "desktop_wait_for_image" }
+      { label: "HTTP Request", type: "http_request", category: "Core", aliases: ["api", "rest"] },
+      { label: "Set Variable", type: "set_variable", category: "Core", aliases: ["context"] },
+      { label: "LLM Clean", type: "transform_llm", category: "Core", aliases: ["ai", "transform"] },
+      { label: "Validate Record", type: "validate_record", category: "Core", aliases: ["schema"] },
+      { label: "Submit Guard", type: "submit_guard", category: "Core", aliases: ["gate", "submit"] },
+      { label: "Manual Approval", type: "manual_approval", category: "Control", aliases: ["review"] },
+      { label: "Conditional Branch", type: "conditional_branch", category: "Control", aliases: ["if", "else"] },
+      { label: "Loop Iterate", type: "loop_iterate", category: "Control", aliases: ["for", "each"] },
+      { label: "Parallel Execute", type: "parallel_execute", category: "Control", aliases: ["concurrent"] },
+      { label: "CSV Import", type: "data_import_csv", category: "Data", aliases: ["spreadsheet"] },
+      { label: "Integration Request", type: "integration_request", category: "Data", aliases: ["connector"] },
+      { label: "Web Navigate", type: "playwright_navigate", category: "Web", aliases: ["browser", "open"] },
+      { label: "Web Click", type: "playwright_click", category: "Web", aliases: ["selector"] },
+      { label: "Web Fill", type: "playwright_fill", category: "Web", aliases: ["form", "input"] },
+      { label: "Web Extract", type: "playwright_extract", category: "Web", aliases: ["scrape"] },
+      { label: "Web Visual Assert", type: "playwright_visual_assert", category: "Web", aliases: ["snapshot", "diff"] },
+      { label: "Desktop Click", type: "desktop_click", category: "Desktop", aliases: ["mouse"] },
+      { label: "Desktop Click Image", type: "desktop_click_image", category: "Desktop", aliases: ["opencv", "image"] },
+      { label: "Desktop Type", type: "desktop_type", category: "Desktop", aliases: ["keyboard"] },
+      { label: "Desktop Wait Image", type: "desktop_wait_for_image", category: "Desktop", aliases: ["wait"] }
     ],
     []
   );
+
+  const filteredNodeOptions = useMemo(() => {
+    const search = nodeSearch.trim().toLowerCase();
+    if (!search) {
+      return nodeOptions;
+    }
+
+    return nodeOptions
+      .filter((option) =>
+        [option.label, option.type, option.category, ...(option.aliases || [])].join(" ").toLowerCase().includes(search)
+      )
+      .sort((a, b) => {
+        const aStarts = a.label.toLowerCase().startsWith(search) || a.type.toLowerCase().startsWith(search);
+        const bStarts = b.label.toLowerCase().startsWith(search) || b.type.toLowerCase().startsWith(search);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return a.label.localeCompare(b.label);
+      });
+  }, [nodeSearch, nodeOptions]);
 
   const templateCategories = useMemo(() => {
     const categories = Array.from(new Set((templates || []).map((template) => String(template.category || "other"))));
@@ -782,6 +808,12 @@ export default function App() {
       if (hasCmd && key === "t") {
         event.preventDefault();
         void withActionLoading("test-run", () => runWorkflow(true));
+        return;
+      }
+      if (hasCmd && key === "k") {
+        event.preventDefault();
+        quickAddInputRef.current?.focus();
+        quickAddInputRef.current?.select();
         return;
       }
       if (hasCmd && key === "d") {
@@ -1223,6 +1255,23 @@ export default function App() {
 
     setStatus(`Added node: ${newNode.data?.label || type}`);
     return id;
+  };
+
+  const handleQuickAddNode = (type: string) => {
+    handleAddNode(type);
+    setNodeSearch("");
+    window.setTimeout(() => {
+      quickAddInputRef.current?.focus();
+    }, 0);
+  };
+
+  const handleQuickAddFirstNode = () => {
+    const first = filteredNodeOptions[0];
+    if (!first) {
+      setFeedback("No node types match your search", "error");
+      return;
+    }
+    handleQuickAddNode(first.type);
   };
 
   const handleDuplicateSelectedNode = () => {
@@ -2475,12 +2524,42 @@ export default function App() {
           onChange={(event) => handleLoadWorkflowFile(event).catch(showError)}
         />
         <div className="toolbar">
-          <div className="toolbar-left">
-            {nodeOptions.map((opt) => (
-              <button key={opt.type} onClick={() => handleAddNode(opt.type)}>
-                + {opt.label}
-              </button>
-            ))}
+          <div className="toolbar-left toolbar-node-add">
+            <input
+              ref={quickAddInputRef}
+              className="toolbar-search"
+              value={nodeSearch}
+              placeholder="Quick add node (Ctrl/Cmd+K)"
+              onChange={(event) => setNodeSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handleQuickAddFirstNode();
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setNodeSearch("");
+                  (event.currentTarget as HTMLInputElement).blur();
+                }
+              }}
+            />
+            <button disabled={!filteredNodeOptions.length} onClick={handleQuickAddFirstNode}>
+              + Add
+            </button>
+            <div className="toolbar-node-suggestions">
+              {filteredNodeOptions.slice(0, 8).map((opt) => (
+                <button
+                  key={opt.type}
+                  className="toolbar-node-suggestion"
+                  title={`${opt.category} · ${opt.type}`}
+                  onClick={() => handleQuickAddNode(opt.type)}
+                >
+                  + {opt.label}
+                </button>
+              ))}
+              {!filteredNodeOptions.length ? <small className="toolbar-node-empty">No matching node types</small> : null}
+            </div>
           </div>
           <div className="toolbar-right">
             <button

@@ -31,7 +31,7 @@ It combines a visual node graph, reliable workflow execution, scheduling, approv
 ```
 2. Open `http://localhost:5173`
 3. Sign in with `.env` credentials (default: `local` / `localpass`)
-4. Optional shortcuts: `Ctrl+S` save, `Ctrl+T` test run, `Ctrl+R` run, `Ctrl+D` duplicate selected node
+4. Optional shortcuts: `Ctrl/Cmd+K` quick-add focus, `Ctrl+S` save, `Ctrl+T` test run, `Ctrl+R` run, `Ctrl+D` duplicate selected node
 
 `start.sh` will:
 - create `.env` from `.env.example` if missing
