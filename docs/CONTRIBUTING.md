@@ -91,6 +91,14 @@ cd apps/web
 npm test
 ```
 
+Web E2E smoke tests (Playwright):
+
+```bash
+cd apps/web
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
 Test locations:
 - `apps/server/src/**/*.test.ts`
 
@@ -101,6 +109,7 @@ When adding features:
 
 CI gate:
 - GitHub Actions workflow `.github/workflows/ci.yml` runs server/web test+build on every PR.
+- CI also runs Playwright smoke tests (`Web E2E Smoke`).
 - Keep CI green before asking for review or merge.
 
 ## 6. Manual QA Checklist

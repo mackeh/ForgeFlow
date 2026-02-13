@@ -81,6 +81,11 @@ Run web tests:
 cd apps/web && npm test
 ```
 
+Run web Playwright smoke tests:
+```bash
+cd apps/web && npx playwright install --with-deps chromium && npm run test:e2e
+```
+
 Build server + web:
 ```bash
 cd apps/server && npm run build
