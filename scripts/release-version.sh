@@ -48,7 +48,9 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-git fetch origin main --tags >/dev/null 2>&1
+if ! git fetch origin main --tags >/dev/null 2>&1; then
+  echo "Warning: could not refresh origin/main or tags. Using local refs."
+fi
 
 read -r BEHIND AHEAD < <(git rev-list --left-right --count origin/main...HEAD)
 if [[ "${BEHIND}" != "0" || "${AHEAD}" != "0" ]]; then
