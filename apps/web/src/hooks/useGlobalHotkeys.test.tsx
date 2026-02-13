@@ -7,6 +7,8 @@ type HarnessProps = {
   onRun?: () => void;
   onTestRun?: () => void;
   onFocusQuickAdd?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
   onDuplicate?: () => void;
   onDelete?: () => void;
   onAutoLayout?: () => void;
@@ -17,6 +19,8 @@ function Harness({
   onRun = () => undefined,
   onTestRun = () => undefined,
   onFocusQuickAdd = () => undefined,
+  onUndo = () => undefined,
+  onRedo = () => undefined,
   onDuplicate = () => undefined,
   onDelete = () => undefined,
   onAutoLayout = () => undefined
@@ -32,6 +36,8 @@ function Harness({
       quickRef.current?.focus();
       onFocusQuickAdd();
     },
+    onUndo,
+    onRedo,
     onDuplicate,
     onDelete,
     onAutoLayout
@@ -65,6 +71,20 @@ test("Delete triggers delete action", () => {
   render(<Harness onDelete={onDelete} />);
   fireEvent.keyDown(window, { key: "Delete" });
   expect(onDelete).toHaveBeenCalledTimes(1);
+});
+
+test("Ctrl/Cmd+Z triggers undo action", () => {
+  const onUndo = vi.fn();
+  render(<Harness onUndo={onUndo} />);
+  fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+  expect(onUndo).toHaveBeenCalledTimes(1);
+});
+
+test("Ctrl/Cmd+Shift+Z triggers redo action", () => {
+  const onRedo = vi.fn();
+  render(<Harness onRedo={onRedo} />);
+  fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+  expect(onRedo).toHaveBeenCalledTimes(1);
 });
 
 test("shortcuts are ignored when focused inside editable elements", () => {

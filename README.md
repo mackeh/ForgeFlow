@@ -9,6 +9,7 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 
 ## What You Get
 - Visual workflow builder (React Flow)
+- Core editor UX: undo/redo, duplicate, edge disconnect, auto-layout, and JSON import/export
 - Web automation (Playwright) and desktop automation (agent service)
 - Recorder flows for web and desktop action capture
 - Autopilot workflow generation from natural-language prompts
@@ -38,16 +39,20 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 
 Power shortcuts:
 - `Ctrl/Cmd+K` quick-add node search
+- `Ctrl/Cmd+Z` undo
+- `Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redo
 - `Ctrl+S` save draft
 - `Ctrl+T` test run
 - `Ctrl+R` run
 - `Ctrl+D` duplicate selected node
+- `Delete` remove selected node or selected edge
 
 ## Demo Flows
 Use these guided demos to evaluate the platform quickly:
 - `docs/DEMOS.md#demo-1-autopilot-invoice-triage`
 - `docs/DEMOS.md#demo-2-orchestrator-unattended-queue`
 - `docs/DEMOS.md#demo-3-document-understanding-and-clipboard-ai`
+- `docs/DEMOS.md#demo-4-workflow-builder-mvp-controls`
 
 ## Contributor Onboarding
 New contributors should start here:
