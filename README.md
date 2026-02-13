@@ -99,6 +99,8 @@ docker compose down
 - `docs/DEPLOYMENT.md`
 - `docs/CONTRIBUTING.md`
 - `AGENTS.md` (repository contributor guide)
+- `CODE_OF_CONDUCT.md`
+- `LICENSE`
 
 ## API Areas
 - Auth: `/api/auth/*`
@@ -133,3 +135,7 @@ docker exec -it rpa-ollama ollama pull llama3.2
 
 ## Support
 - https://buymeacoffee.com/mackeh
+
+## Community Standards
+- Code of Conduct: `CODE_OF_CONDUCT.md`
+- License: `LICENSE` (MIT)

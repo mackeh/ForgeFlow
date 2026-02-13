@@ -5,6 +5,7 @@ This guide standardizes local setup, coding practices, and contribution workflow
 Start here if you are new:
 - `docs/ONBOARDING.md` for the fastest first-PR path.
 - `docs/DEMOS.md` for repeatable product walkthrough flows.
+- `CODE_OF_CONDUCT.md` for expected behavior in community interactions.
 
 ## 1. Prerequisites
 
