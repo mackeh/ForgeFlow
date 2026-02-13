@@ -5,12 +5,22 @@ import { attachRecorderWs, startWebRecorder, stopWebRecorder } from "./recorder.
 class FakePage {
   binding: ((source: unknown, payload: any) => void) | null = null;
   gotoUrl: string | null = null;
+  listeners = new Map<string, Array<(payload: any) => void>>();
   async addInitScript(_fn: unknown) {}
   async exposeBinding(_name: string, fn: (source: unknown, payload: any) => void) {
     this.binding = fn;
   }
+  on(event: string, handler: (payload: any) => void) {
+    const list = this.listeners.get(event) || [];
+    list.push(handler);
+    this.listeners.set(event, list);
+  }
   async goto(url: string) {
     this.gotoUrl = url;
+  }
+  emit(event: string, payload: any) {
+    const list = this.listeners.get(event) || [];
+    list.forEach((handler) => handler(payload));
   }
 }
 
@@ -69,12 +79,21 @@ test("web recorder broadcasts captured events to websocket clients", async () =>
   assert.equal(JSON.parse(sent[0]).type, "recorder:ready");
 
   browser.context.page.binding?.({}, { type: "click", selector: "#submit" });
+  browser.context.page.emit("framenavigated", {
+    parentFrame: () => null,
+    url: () => "https://example.com/next"
+  });
   assert.equal(sent.length >= 2, true);
   assert.equal(JSON.parse(sent[1]).type, "recorder:event");
+  assert.equal(sent.length >= 3, true);
+  const navEvent = JSON.parse(sent[2]);
+  assert.equal(navEvent.type, "recorder:event");
+  assert.equal(navEvent.payload.type, "navigate");
 
   const stopped = await stopWebRecorder("session-1");
-  assert.equal(stopped?.events?.length, 1);
+  assert.equal(stopped?.events?.length, 2);
   assert.equal((stopped?.events?.[0] as any).selector, "#submit");
+  assert.equal((stopped?.events?.[1] as any).type, "navigate");
   assert.equal(browser.closed, true);
 });
 

@@ -14,6 +14,7 @@ test("quick-add input Enter triggers add-first action", () => {
       onQuickAddNode={() => undefined}
       isActionLoading={() => false}
       onRecordWeb={() => undefined}
+      webRecording={false}
       onRecordDesktop={() => undefined}
       desktopRecording={false}
       onAutoLayout={() => undefined}
@@ -50,6 +51,7 @@ test("toolbar shows dirty draft status", () => {
       onQuickAddNode={() => undefined}
       isActionLoading={() => false}
       onRecordWeb={() => undefined}
+      webRecording={false}
       onRecordDesktop={() => undefined}
       desktopRecording={false}
       onAutoLayout={() => undefined}
@@ -87,6 +89,7 @@ test("toolbar triggers undo and redo actions", () => {
       onQuickAddNode={() => undefined}
       isActionLoading={() => false}
       onRecordWeb={() => undefined}
+      webRecording={false}
       onRecordDesktop={() => undefined}
       desktopRecording={false}
       onAutoLayout={() => undefined}
@@ -112,4 +115,74 @@ test("toolbar triggers undo and redo actions", () => {
   fireEvent.click(screen.getByRole("button", { name: "Redo" }));
   expect(onUndo).toHaveBeenCalledTimes(1);
   expect(onRedo).toHaveBeenCalledTimes(1);
+});
+
+test("record web button label reflects recording state", () => {
+  const { rerender } = render(
+    <CanvasToolbar
+      nodeSearch=""
+      onNodeSearchChange={() => undefined}
+      quickAddInputRef={createRef<HTMLInputElement>()}
+      filteredNodeOptions={[]}
+      onQuickAddFirstNode={() => undefined}
+      onQuickAddNode={() => undefined}
+      isActionLoading={() => false}
+      onRecordWeb={() => undefined}
+      webRecording={false}
+      onRecordDesktop={() => undefined}
+      desktopRecording={false}
+      onAutoLayout={() => undefined}
+      onUndo={() => undefined}
+      onRedo={() => undefined}
+      canUndo={false}
+      canRedo={false}
+      onDuplicateSelectedNode={() => undefined}
+      canDuplicateSelectedNode={false}
+      onDisconnectSelectedEdge={() => undefined}
+      canDisconnectSelectedEdge={false}
+      snapToGrid={true}
+      onToggleSnap={() => undefined}
+      onSaveDraft={() => undefined}
+      onPublish={() => undefined}
+      onTestRun={() => undefined}
+      onRun={() => undefined}
+      isDirty={false}
+      lastAutoSaveAt={null}
+    />
+  );
+  expect(screen.getByRole("button", { name: "Record Web" })).toBeInTheDocument();
+
+  rerender(
+    <CanvasToolbar
+      nodeSearch=""
+      onNodeSearchChange={() => undefined}
+      quickAddInputRef={createRef<HTMLInputElement>()}
+      filteredNodeOptions={[]}
+      onQuickAddFirstNode={() => undefined}
+      onQuickAddNode={() => undefined}
+      isActionLoading={() => false}
+      onRecordWeb={() => undefined}
+      webRecording={true}
+      onRecordDesktop={() => undefined}
+      desktopRecording={false}
+      onAutoLayout={() => undefined}
+      onUndo={() => undefined}
+      onRedo={() => undefined}
+      canUndo={false}
+      canRedo={false}
+      onDuplicateSelectedNode={() => undefined}
+      canDuplicateSelectedNode={false}
+      onDisconnectSelectedEdge={() => undefined}
+      canDisconnectSelectedEdge={false}
+      snapToGrid={true}
+      onToggleSnap={() => undefined}
+      onSaveDraft={() => undefined}
+      onPublish={() => undefined}
+      onTestRun={() => undefined}
+      onRun={() => undefined}
+      isDirty={false}
+      lastAutoSaveAt={null}
+    />
+  );
+  expect(screen.getByRole("button", { name: "Stop Web" })).toBeInTheDocument();
 });

@@ -8,7 +8,7 @@ import { WebSocketServer } from "ws";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { authMiddleware, getAuthContext, requirePermission, signToken, verifyLogin } from "./lib/auth.js";
-import { startWebRecorder, attachRecorderWs } from "./lib/recorder.js";
+import { startWebRecorder, stopWebRecorder, attachRecorderWs } from "./lib/recorder.js";
 import { getActiveRunCount, startRun, waitForActiveRuns } from "./lib/runner.js";
 import { startDesktopRecording, stopDesktopRecording } from "./lib/agent.js";
 import {
@@ -2174,6 +2174,21 @@ app.post("/api/recorders/web/start", canWriteWorkflows, async (req, res) => {
   }
   const session = await startWebRecorder({ startUrl: parsed.data.startUrl });
   res.json(session);
+});
+
+app.post("/api/recorders/web/stop", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({ sessionId: z.string().min(1) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  const result = await stopWebRecorder(parsed.data.sessionId);
+  if (!result) {
+    res.status(404).json({ error: "Recorder session not found" });
+    return;
+  }
+  res.json(result);
 });
 
 app.post("/api/recorders/desktop/start", canWriteWorkflows, async (req, res) => {

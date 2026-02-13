@@ -11,7 +11,7 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 - Visual workflow builder (React Flow)
 - Core editor UX: undo/redo, duplicate, edge disconnect, auto-layout, and JSON import/export
 - Web automation (Playwright) and desktop automation (agent service)
-- Recorder flows for web and desktop action capture
+- Recorder flows for web and desktop action capture with review-before-insert draft editing
 - Autopilot workflow generation from natural-language prompts
 - AI nodes: `transform_llm`, `document_understanding`, `clipboard_ai_transfer`
 - Integrations (`http_api`, `postgresql`, `mysql`, `mongodb`, `google_sheets`, `airtable`, `s3`)
@@ -53,6 +53,7 @@ Use these guided demos to evaluate the platform quickly:
 - `docs/DEMOS.md#demo-2-orchestrator-unattended-queue`
 - `docs/DEMOS.md#demo-3-document-understanding-and-clipboard-ai`
 - `docs/DEMOS.md#demo-4-workflow-builder-mvp-controls`
+- `docs/DEMOS.md#demo-5-recorder-draft-review-and-insert`
 
 ## Contributor Onboarding
 New contributors should start here:

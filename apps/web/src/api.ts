@@ -582,6 +582,13 @@ export function startRecorder(startUrl?: string) {
   });
 }
 
+export function stopRecorder(sessionId: string) {
+  return request<{ sessionId: string; events: Array<Record<string, unknown>> }>("/api/recorders/web/stop", {
+    method: "POST",
+    body: JSON.stringify({ sessionId })
+  });
+}
+
 export function startDesktopRecorder(label?: string) {
   return request("/api/recorders/desktop/start", {
     method: "POST",

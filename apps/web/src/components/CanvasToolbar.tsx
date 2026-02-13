@@ -10,6 +10,7 @@ type CanvasToolbarProps = {
   onQuickAddNode: (type: string) => void;
   isActionLoading: (actionId: string) => boolean;
   onRecordWeb: () => void;
+  webRecording: boolean;
   onRecordDesktop: () => void;
   desktopRecording: boolean;
   onAutoLayout: () => void;
@@ -40,6 +41,7 @@ export function CanvasToolbar({
   onQuickAddNode,
   isActionLoading,
   onRecordWeb,
+  webRecording,
   onRecordDesktop,
   desktopRecording,
   onAutoLayout,
@@ -114,7 +116,7 @@ export function CanvasToolbar({
           className={isActionLoading("record-web") ? "is-loading" : ""}
           onClick={onRecordWeb}
         >
-          {isActionLoading("record-web") ? "Starting..." : "Record Web"}
+          {isActionLoading("record-web") ? "Working..." : webRecording ? "Stop Web" : "Record Web"}
         </button>
         <button
           disabled={isActionLoading("record-desktop")}
