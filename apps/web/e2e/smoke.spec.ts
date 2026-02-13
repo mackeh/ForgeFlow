@@ -48,7 +48,7 @@ test("orchestrator queue and dispatch smoke", async ({ page }) => {
 test("mining panel loads smoke", async ({ page }) => {
   await signIn(page);
 
-  await page.getByRole("button", { name: "Mining" }).click();
+  await page.getByRole("button", { name: "Mining", exact: true }).click();
   await page.getByRole("button", { name: "Refresh Mining" }).click();
 
   await expect(page.getByRole("heading", { name: "Process Mining" })).toBeVisible();
