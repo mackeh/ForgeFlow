@@ -11,3 +11,4 @@ This folder contains the long-form technical documentation for operators and con
 
 Recent UX baseline:
 - Quick-add node search in toolbar (`Ctrl/Cmd+K`) is a core workflow path and should remain covered in manual QA.
+- Autopilot prompt-to-workflow flow is a core low-code path and should remain covered in manual QA.

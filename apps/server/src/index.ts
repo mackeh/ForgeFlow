@@ -36,6 +36,8 @@ import {
 } from "./lib/scheduleStore.js";
 import { buildSchedulePreview, buildUpcomingRuns, listSchedulePresets } from "./lib/schedulePreview.js";
 import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
+import { listActivities } from "./lib/activities.js";
+import { buildAutopilotPlan } from "./lib/autopilot.js";
 import {
   beginTwoFactorSetup,
   confirmTwoFactorSetup,
@@ -418,6 +420,7 @@ const canExecuteWorkflows = requirePermission("workflows:execute");
 const canApproveWorkflows = requirePermission("workflows:approve");
 const canManageSchedules = requirePermission("schedules:manage");
 const canReadTemplates = requirePermission("templates:read");
+const canReadActivities = requirePermission("templates:read");
 const canReadMetrics = requirePermission("metrics:read");
 const canReadSecrets = requirePermission("secrets:read");
 const canWriteSecrets = requirePermission("secrets:write");
@@ -525,6 +528,35 @@ app.get("/api/system/time", (_req, res) => {
 app.get("/api/templates", canReadTemplates, async (_req, res) => {
   const templates = await cache.getOrSet("templates:list", CACHE_TTL.templatesMs, async () => listWorkflowTemplates());
   res.json(templates);
+});
+
+app.get("/api/activities", canReadActivities, async (_req, res) => {
+  const catalog = await cache.getOrSet("activities:catalog", CACHE_TTL.templatesMs, async () => listActivities());
+  res.json(catalog);
+});
+
+app.post("/api/autopilot/plan", canWriteWorkflows, async (req, res) => {
+  const schema = z.object({
+    prompt: z.string().min(6),
+    name: z.string().optional()
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+
+  const plan = buildAutopilotPlan(parsed.data.prompt, parsed.data.name);
+  await writeAuditEvent(req, {
+    action: "workflow.autopilot_plan",
+    resourceType: "workflow",
+    success: true,
+    metadata: {
+      promptLength: parsed.data.prompt.length,
+      capabilities: plan.capabilities
+    }
+  });
+  res.json(plan);
 });
 
 app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => {

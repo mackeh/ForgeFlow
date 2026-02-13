@@ -11,6 +11,8 @@ It combines a visual node graph, reliable workflow execution, scheduling, approv
 - Retry/timeout/checkpoint execution engine
 - Manual approvals and resume-from-failure
 - Templates, schedules, schedule presets, upcoming-run calendar
+- Autopilot draft generation from natural-language prompts
+- Activity catalog endpoint with available/planned activity packs
 - Integrations (`http_api`, `postgresql`, `mysql`, `mongodb`, `google_sheets`, `airtable`, `s3`)
 - Secrets management (encrypted), webhook delivery, audit logging
 - Metrics dashboard + Prometheus `/metrics`
@@ -83,6 +85,11 @@ Run backend tests:
 docker compose run --rm server npm test
 ```
 
+Run web UI tests:
+```bash
+cd apps/web && npm test
+```
+
 Stop stack:
 ```bash
 docker compose down
@@ -98,6 +105,7 @@ docker compose logs -f
 - Workflows: `/api/workflows*`
 - Runs: `/api/runs*`
 - Templates: `/api/templates`, `/api/workflows/from-template`
+- Activities + Autopilot: `/api/activities`, `/api/autopilot/plan`
 - Schedules: `/api/schedules*`
 - Metrics dashboard: `/api/metrics/dashboard`
 - Prometheus metrics: `/metrics`

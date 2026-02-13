@@ -51,11 +51,13 @@ Base URL (local): `http://localhost:8080`
 | GET | `/api/system/time` | Any authenticated user | Returns UTC + configured local schedule time |
 | POST | `/api/system/preflight` | `workflows:execute` | Validates workflow definition/workflowId before run |
 
-## 5. Templates
+## 5. Templates, Activities, and Autopilot
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | GET | `/api/templates` | `templates:read` | List built-in workflow templates |
+| GET | `/api/activities` | `templates:read` | List activity catalog (available + planned packs) |
+| POST | `/api/autopilot/plan` | `workflows:write` | Generate workflow draft definition from natural-language prompt |
 | POST | `/api/workflows/from-template` | `workflows:write` | Create workflow from template |
 
 ## 6. Workflows and Collaboration
@@ -192,6 +194,15 @@ curl -sS http://localhost:8080/api/workflows \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"Invoice Sync"}'
+```
+
+## Autopilot Plan
+
+```bash
+curl -sS http://localhost:8080/api/autopilot/plan \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Open website, scrape invoice table, clean with AI, and send to API"}'
 ```
 
 ## Start Test Run

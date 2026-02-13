@@ -37,6 +37,7 @@ flowchart LR
 ### `apps/server`
 - Express API and orchestration control plane.
 - Owns authentication, authorization, workflow CRUD/versioning, schedule management, run lifecycle, secrets, webhooks, metrics, and audit logging.
+- Includes Autopilot planner (`/api/autopilot/plan`) and activity catalog (`/api/activities`) for low-code generation workflows.
 - Exposes:
   - HTTP API (`/api/*`)
   - health/readiness (`/health`, `/ready`)
@@ -96,6 +97,12 @@ sequenceDiagram
 2. Cron trigger checks dependency/maintenance-window constraints.
 3. Scheduler creates run and calls the same run engine path.
 4. Run status and metrics are persisted exactly like manual runs.
+
+### Autopilot Draft Generation
+1. User submits prompt in UI (`Autopilot` sidebar section).
+2. API builds a deterministic draft definition from recognized intents (web, scraping, API, AI, approvals).
+3. UI creates workflow with returned definition and opens it for editing.
+4. User refines generated nodes in inspector before publish/run.
 
 ### Approval Gate
 1. `manual_approval` node pauses run with `WAITING_APPROVAL`.

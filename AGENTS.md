@@ -14,6 +14,7 @@
 - `docker compose down`: stop all services.
 - `docker compose logs -f`: tail stack logs.
 - `docker compose run --rm server npm test`: run backend test suite in container.
+- `cd apps/web && npm test`: run web UI tests (Vitest).
 - Local app-by-app dev:
   - `cd apps/server && npm install && npm run dev`
   - `cd apps/web && npm install && npm run dev`

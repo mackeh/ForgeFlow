@@ -68,3 +68,29 @@ export type ActionNodeData = {
   __runError?: string;
   [key: string]: unknown;
 };
+
+export type ActivityCatalogItem = {
+  id: string;
+  label: string;
+  category: string;
+  status: "available" | "planned";
+  description: string;
+  aliases?: string[];
+};
+
+export type ActivityCatalog = {
+  targetLibrarySize: number;
+  currentTotal: number;
+  availableCount: number;
+  plannedCount: number;
+  byCategory: Record<string, number>;
+  items: ActivityCatalogItem[];
+};
+
+export type AutopilotPlan = {
+  name: string;
+  description: string;
+  capabilities: string[];
+  warnings: string[];
+  definition: WorkflowDefinition;
+};

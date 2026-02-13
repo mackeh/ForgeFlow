@@ -85,6 +85,11 @@ Templates:
 - choose template in sidebar
 - click `Create From Template`
 
+Autopilot:
+- open sidebar `Autopilot`
+- describe the process in plain language
+- click `Generate with Autopilot` to create a draft workflow
+
 Schedules:
 - set cron + timezone
 - optional dependency chain

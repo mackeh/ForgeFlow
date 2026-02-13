@@ -29,6 +29,8 @@ import {
   deleteSchedule,
   deleteWebhook,
   deleteWorkflowComment,
+  generateAutopilotPlan,
+  getActivities,
   getDashboardMetrics,
   getIntegrations,
   getAdminUsers,
@@ -76,17 +78,23 @@ import {
   verifyTwoFactorSetup,
 } from "./api";
 import { ActionNode } from "./components/ActionNode";
+import { CanvasToolbar } from "./components/CanvasToolbar";
 import { Sidebar } from "./components/Sidebar";
 import { Inspector } from "./components/Inspector";
-import type { WorkflowDefinition, WorkflowRecord, WorkflowRunDetail, WorkflowRunSummary, WorkflowSummary, WorkflowVersion } from "./types";
+import { useGlobalHotkeys } from "./hooks/useGlobalHotkeys";
+import { filterNodeOptions, NODE_OPTIONS } from "./lib/nodeCatalog";
+import { buildPersistedDefinition, hashDefinition } from "./lib/workflowDraft";
+import type {
+  ActivityCatalog,
+  WorkflowDefinition,
+  WorkflowRecord,
+  WorkflowRunDetail,
+  WorkflowRunSummary,
+  WorkflowSummary,
+  WorkflowVersion
+} from "./types";
 
 const nodeTypes = { action: ActionNode };
-type NodeOption = {
-  label: string;
-  type: string;
-  category: "Core" | "Control" | "Data" | "Web" | "Desktop";
-  aliases?: string[];
-};
 type ToastLevel = "info" | "success" | "error";
 type ToastAction = {
   label: string;
@@ -264,6 +272,9 @@ export default function App() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateWorkflowName, setTemplateWorkflowName] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
+  const [autopilotPrompt, setAutopilotPrompt] = useState("");
+  const [autopilotWorkflowName, setAutopilotWorkflowName] = useState("");
+  const [activityCatalog, setActivityCatalog] = useState<ActivityCatalog | null>(null);
   const [nodeSearch, setNodeSearch] = useState("");
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState("all");
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -306,6 +317,8 @@ export default function App() {
   const [uiLogs, setUiLogs] = useState<UiLogEntry[]>([]);
   const [loadingActions, setLoadingActions] = useState<Record<string, boolean>>({});
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const [isDirty, setIsDirty] = useState(false);
+  const [lastAutoSaveAt, setLastAutoSaveAt] = useState<string | null>(null);
   const [collabPresence, setCollabPresence] = useState<WorkflowPresence[]>([]);
   const [workflowComments, setWorkflowComments] = useState<WorkflowComment[]>([]);
   const [workflowHistory, setWorkflowHistory] = useState<WorkflowHistory | null>(null);
@@ -323,6 +336,8 @@ export default function App() {
   const logIdRef = useRef(1);
   const collabSocketRef = useRef<WebSocket | null>(null);
   const collabHeartbeatRef = useRef<number | null>(null);
+  const lastSavedHashRef = useRef("");
+  const autosaveInFlightRef = useRef(false);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -332,48 +347,10 @@ export default function App() {
     edgesRef.current = edges;
   }, [edges]);
 
-  const nodeOptions = useMemo<NodeOption[]>(
-    () => [
-      { label: "HTTP Request", type: "http_request", category: "Core", aliases: ["api", "rest"] },
-      { label: "Set Variable", type: "set_variable", category: "Core", aliases: ["context"] },
-      { label: "LLM Clean", type: "transform_llm", category: "Core", aliases: ["ai", "transform"] },
-      { label: "Validate Record", type: "validate_record", category: "Core", aliases: ["schema"] },
-      { label: "Submit Guard", type: "submit_guard", category: "Core", aliases: ["gate", "submit"] },
-      { label: "Manual Approval", type: "manual_approval", category: "Control", aliases: ["review"] },
-      { label: "Conditional Branch", type: "conditional_branch", category: "Control", aliases: ["if", "else"] },
-      { label: "Loop Iterate", type: "loop_iterate", category: "Control", aliases: ["for", "each"] },
-      { label: "Parallel Execute", type: "parallel_execute", category: "Control", aliases: ["concurrent"] },
-      { label: "CSV Import", type: "data_import_csv", category: "Data", aliases: ["spreadsheet"] },
-      { label: "Integration Request", type: "integration_request", category: "Data", aliases: ["connector"] },
-      { label: "Web Navigate", type: "playwright_navigate", category: "Web", aliases: ["browser", "open"] },
-      { label: "Web Click", type: "playwright_click", category: "Web", aliases: ["selector"] },
-      { label: "Web Fill", type: "playwright_fill", category: "Web", aliases: ["form", "input"] },
-      { label: "Web Extract", type: "playwright_extract", category: "Web", aliases: ["scrape"] },
-      { label: "Web Visual Assert", type: "playwright_visual_assert", category: "Web", aliases: ["snapshot", "diff"] },
-      { label: "Desktop Click", type: "desktop_click", category: "Desktop", aliases: ["mouse"] },
-      { label: "Desktop Click Image", type: "desktop_click_image", category: "Desktop", aliases: ["opencv", "image"] },
-      { label: "Desktop Type", type: "desktop_type", category: "Desktop", aliases: ["keyboard"] },
-      { label: "Desktop Wait Image", type: "desktop_wait_for_image", category: "Desktop", aliases: ["wait"] }
-    ],
-    []
-  );
+  const nodeOptions = NODE_OPTIONS;
 
   const filteredNodeOptions = useMemo(() => {
-    const search = nodeSearch.trim().toLowerCase();
-    if (!search) {
-      return nodeOptions;
-    }
-
-    return nodeOptions
-      .filter((option) =>
-        [option.label, option.type, option.category, ...(option.aliases || [])].join(" ").toLowerCase().includes(search)
-      )
-      .sort((a, b) => {
-        const aStarts = a.label.toLowerCase().startsWith(search) || a.type.toLowerCase().startsWith(search);
-        const bStarts = b.label.toLowerCase().startsWith(search) || b.type.toLowerCase().startsWith(search);
-        if (aStarts !== bStarts) return aStarts ? -1 : 1;
-        return a.label.localeCompare(b.label);
-      });
+    return filterNodeOptions(nodeOptions, nodeSearch);
   }, [nodeSearch, nodeOptions]);
 
   const templateCategories = useMemo(() => {
@@ -571,6 +548,11 @@ export default function App() {
         if (Array.isArray(list) && list.length && !selectedTemplateId) {
           setSelectedTemplateId(list[0].id);
         }
+      })
+      .catch(showError);
+    getActivities()
+      .then((catalog) => {
+        setActivityCatalog(catalog || null);
       })
       .catch(showError);
     getIntegrations()
@@ -775,69 +757,6 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [token, scheduleCron, scheduleTimezone, systemTime?.timezone]);
 
-  useEffect(() => {
-    const isEditableTarget = (target: EventTarget | null) => {
-      const element = target as HTMLElement | null;
-      if (!element) return false;
-      const tagName = element.tagName?.toLowerCase();
-      return (
-        tagName === "input" ||
-        tagName === "textarea" ||
-        tagName === "select" ||
-        Boolean(element.isContentEditable)
-      );
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!token) return;
-      if (isEditableTarget(event.target)) return;
-
-      const key = event.key.toLowerCase();
-      const hasCmd = event.ctrlKey || event.metaKey;
-
-      if (hasCmd && key === "s") {
-        event.preventDefault();
-        void withActionLoading("save-draft", handleSave);
-        return;
-      }
-      if (hasCmd && key === "r") {
-        event.preventDefault();
-        void withActionLoading("run", () => runWorkflow(false));
-        return;
-      }
-      if (hasCmd && key === "t") {
-        event.preventDefault();
-        void withActionLoading("test-run", () => runWorkflow(true));
-        return;
-      }
-      if (hasCmd && key === "k") {
-        event.preventDefault();
-        quickAddInputRef.current?.focus();
-        quickAddInputRef.current?.select();
-        return;
-      }
-      if (hasCmd && key === "d") {
-        event.preventDefault();
-        handleDuplicateSelectedNode();
-        return;
-      }
-      if (key === "delete" || key === "backspace") {
-        event.preventDefault();
-        handleDeleteSelectedNode();
-        return;
-      }
-      if (event.code === "Space") {
-        event.preventDefault();
-        void withActionLoading("auto-layout", autoLayoutNodes);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [token, selectedNode, activeWorkflow, nodes, edges]);
-
   const pushToast = (message: string, level: ToastLevel = "info", action?: ToastAction) => {
     const id = toastIdRef.current++;
     setToasts((prev) => [...prev, { id, message, level, action }]);
@@ -996,6 +915,11 @@ export default function App() {
     const def = fullWorkflow.draftDefinition || fullWorkflow.definition || defaultDefinition;
     setNodes(def.nodes || defaultDefinition.nodes);
     setEdges(def.edges || []);
+    lastSavedHashRef.current = hashDefinition(
+      buildPersistedDefinition(defaultDefinition, def, (def.nodes || defaultDefinition.nodes) as Node[], (def.edges || []) as Edge[])
+    );
+    setIsDirty(false);
+    setLastAutoSaveAt(null);
     await Promise.all([refreshWorkflowMeta(fullWorkflow.id), refreshWorkflowCollaboration(fullWorkflow.id)]);
   };
 
@@ -1049,6 +973,35 @@ export default function App() {
     await refreshDashboard();
   };
 
+  const handleCreateFromAutopilot = async () => {
+    const prompt = autopilotPrompt.trim();
+    if (prompt.length < 6) {
+      setFeedback("Describe the automation in at least 6 characters", "error");
+      return;
+    }
+    const plan = await generateAutopilotPlan({
+      prompt,
+      name: autopilotWorkflowName.trim() || undefined
+    });
+    const created = await createWorkflow({
+      name: plan.name,
+      definition: plan.definition
+    });
+    setWorkflowList((list) => [created, ...list]);
+    await selectWorkflow(created);
+    setAutopilotPrompt("");
+    setAutopilotWorkflowName("");
+    const capabilityPreview = plan.capabilities.slice(0, 3).join(", ");
+    setFeedback(
+      `Autopilot draft created${capabilityPreview ? ` (${capabilityPreview}${plan.capabilities.length > 3 ? ", ..." : ""})` : ""}`,
+      "success"
+    );
+    if (plan.warnings.length) {
+      setFeedback(`Autopilot note: ${plan.warnings[0]}`, "info");
+    }
+    await refreshDashboard();
+  };
+
   const handleLogout = () => {
     clearToken();
     setToken(null);
@@ -1061,6 +1014,9 @@ export default function App() {
     setVersions([]);
     setSecrets([]);
     setTemplates([]);
+    setActivityCatalog(null);
+    setAutopilotPrompt("");
+    setAutopilotWorkflowName("");
     setSchedules([]);
     setScheduleDependsOnId("");
     setMaintenanceEnabled(false);
@@ -1089,16 +1045,30 @@ export default function App() {
     setLoginTotpCode("");
     setNodes(defaultDefinition.nodes as Node[]);
     setEdges(defaultDefinition.edges as Edge[]);
+    lastSavedHashRef.current = "";
+    setIsDirty(false);
+    setLastAutoSaveAt(null);
     setStatus("");
   };
 
-  const handleSave = async () => {
+  const handleSave = async (options?: { silent?: boolean; autosave?: boolean }) => {
     if (!activeWorkflow) return null;
     const definition = buildCurrentDefinition();
     const updated = await updateWorkflow(activeWorkflow.id, { definition, notes: "Saved from UI" });
     setActiveWorkflow(updated);
     setWorkflowList((list) => list.map((item) => (item.id === updated.id ? updated : item)));
-    setFeedback("Draft saved", "success");
+    lastSavedHashRef.current = hashDefinition(definition);
+    setIsDirty(false);
+    if (options?.autosave) {
+      const nowText = new Date().toLocaleTimeString();
+      setLastAutoSaveAt(nowText);
+      setStatus(`Autosaved at ${nowText}`);
+    } else {
+      setLastAutoSaveAt(null);
+    }
+    if (!options?.silent) {
+      setFeedback("Draft saved", "success");
+    }
     return updated;
   };
 
@@ -1111,7 +1081,7 @@ export default function App() {
       setFeedback(message, "error");
       return;
     }
-    await handleSave();
+    await handleSave({ silent: true });
     const preflight = await runPreflight({ definition });
     if (!preflight.ready) {
       const msg = preflight.messages?.join(" | ") || "Preflight failed";
@@ -1132,7 +1102,7 @@ export default function App() {
 
   const handlePublish = async () => {
     if (!activeWorkflow) return;
-    await handleSave();
+    await handleSave({ silent: true });
     await publishWorkflow(activeWorkflow.id, "Published from UI");
     setFeedback("Published", "success");
     await refreshWorkflowMeta(activeWorkflow.id);
@@ -1959,14 +1929,65 @@ export default function App() {
     setFeedback(`Workflow loaded from ${file.name}`, "success");
   };
 
+  const isBusyForAutosave =
+    Boolean(loadingActions["save-draft"]) ||
+    Boolean(loadingActions.publish) ||
+    Boolean(loadingActions.run) ||
+    Boolean(loadingActions["test-run"]);
+
+  useEffect(() => {
+    if (!activeWorkflow) {
+      setIsDirty(false);
+      return;
+    }
+    const currentHash = hashDefinition(buildCurrentDefinition());
+    if (!lastSavedHashRef.current) {
+      lastSavedHashRef.current = currentHash;
+      setIsDirty(false);
+      return;
+    }
+    setIsDirty(currentHash !== lastSavedHashRef.current);
+  }, [activeWorkflow?.id, nodes, edges]);
+
+  useEffect(() => {
+    if (!activeWorkflow || !isDirty || isBusyForAutosave) return;
+    const timer = window.setTimeout(() => {
+      if (autosaveInFlightRef.current) return;
+      autosaveInFlightRef.current = true;
+      handleSave({ silent: true, autosave: true })
+        .catch(showError)
+        .finally(() => {
+          autosaveInFlightRef.current = false;
+        });
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [activeWorkflow?.id, isDirty, nodes, edges, isBusyForAutosave]);
+
+  useGlobalHotkeys({
+    enabled: Boolean(token),
+    onSave: () => {
+      void withActionLoading("save-draft", () => handleSave());
+    },
+    onRun: () => {
+      void withActionLoading("run", () => runWorkflow(false));
+    },
+    onTestRun: () => {
+      void withActionLoading("test-run", () => runWorkflow(true));
+    },
+    onFocusQuickAdd: () => {
+      quickAddInputRef.current?.focus();
+      quickAddInputRef.current?.select();
+    },
+    onDuplicate: handleDuplicateSelectedNode,
+    onDelete: handleDeleteSelectedNode,
+    onAutoLayout: () => {
+      void withActionLoading("auto-layout", autoLayoutNodes);
+    }
+  });
+
   const buildCurrentDefinition = () => {
     const existing = activeWorkflow?.draftDefinition || activeWorkflow?.definition || defaultDefinition;
-    return {
-      ...defaultDefinition,
-      ...existing,
-      nodes,
-      edges
-    };
+    return buildPersistedDefinition(defaultDefinition, existing, nodes, edges);
   };
 
   const miniMapNodeColor = (node: any) => {
@@ -1988,6 +2009,7 @@ export default function App() {
   const availableRoleNames = roles.map((entry) => entry.role);
   const sidebarShortcuts = [
     { id: "workflow", label: "Workflow" },
+    { id: "autopilot", label: "Autopilot" },
     { id: "templates", label: "Templates" },
     { id: "integrations", label: "Integrations" },
     { id: "schedules", label: "Schedules" },
@@ -2145,6 +2167,44 @@ export default function App() {
           ))}
           {!workflowHistory?.events?.length ? <small>No history yet</small> : null}
         </div>
+        <h3 id="sidebar-autopilot">Autopilot</h3>
+        <small>Describe desired automation in plain language. ForgeFlow will generate a draft workflow.</small>
+        <input
+          value={autopilotWorkflowName}
+          onChange={(e) => setAutopilotWorkflowName(e.target.value)}
+          placeholder="Workflow name (optional)"
+        />
+        <textarea
+          value={autopilotPrompt}
+          onChange={(e) => setAutopilotPrompt(e.target.value)}
+          rows={4}
+          placeholder="Example: Open CRM portal, extract pending invoices, clean with AI, send to API, then request manager approval."
+        />
+        <button
+          disabled={isActionLoading("autopilot")}
+          className={isActionLoading("autopilot") ? "is-loading" : ""}
+          onClick={() => withActionLoading("autopilot", handleCreateFromAutopilot)}
+        >
+          {isActionLoading("autopilot") ? "Generating..." : "Generate with Autopilot"}
+        </button>
+        {activityCatalog ? (
+          <>
+            <small>
+              Activity Library: {activityCatalog.currentTotal} total ({activityCatalog.availableCount} available,{" "}
+              {activityCatalog.plannedCount} planned) · target {activityCatalog.targetLibrarySize}+
+            </small>
+            <div className="selected-events">
+              {Object.entries(activityCatalog.byCategory)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 6)
+                .map(([category, count]) => (
+                  <span key={category} className="chip">
+                    {category}: {count}
+                  </span>
+                ))}
+            </div>
+          </>
+        ) : null}
         <h3 id="sidebar-templates">Templates</h3>
         <input
           value={templateSearch}
@@ -2523,107 +2583,31 @@ export default function App() {
           style={{ display: "none" }}
           onChange={(event) => handleLoadWorkflowFile(event).catch(showError)}
         />
-        <div className="toolbar">
-          <div className="toolbar-left toolbar-node-add">
-            <input
-              ref={quickAddInputRef}
-              className="toolbar-search"
-              value={nodeSearch}
-              placeholder="Quick add node (Ctrl/Cmd+K)"
-              onChange={(event) => setNodeSearch(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleQuickAddFirstNode();
-                  return;
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setNodeSearch("");
-                  (event.currentTarget as HTMLInputElement).blur();
-                }
-              }}
-            />
-            <button disabled={!filteredNodeOptions.length} onClick={handleQuickAddFirstNode}>
-              + Add
-            </button>
-            <div className="toolbar-node-suggestions">
-              {filteredNodeOptions.slice(0, 8).map((opt) => (
-                <button
-                  key={opt.type}
-                  className="toolbar-node-suggestion"
-                  title={`${opt.category} · ${opt.type}`}
-                  onClick={() => handleQuickAddNode(opt.type)}
-                >
-                  + {opt.label}
-                </button>
-              ))}
-              {!filteredNodeOptions.length ? <small className="toolbar-node-empty">No matching node types</small> : null}
-            </div>
-          </div>
-          <div className="toolbar-right">
-            <button
-              disabled={isActionLoading("record-web")}
-              className={isActionLoading("record-web") ? "is-loading" : ""}
-              onClick={() => withActionLoading("record-web", handleStartRecorder)}
-            >
-              {isActionLoading("record-web") ? "Starting..." : "Record Web"}
-            </button>
-            <button
-              disabled={isActionLoading("record-desktop")}
-              className={isActionLoading("record-desktop") ? "is-loading" : ""}
-              onClick={() =>
-                withActionLoading("record-desktop", () =>
-                  desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()
-                )
-              }
-            >
-              {isActionLoading("record-desktop") ? "Working..." : desktopRecording ? "Stop Desktop" : "Record Desktop"}
-            </button>
-            <button
-              disabled={isActionLoading("auto-layout")}
-              className={isActionLoading("auto-layout") ? "is-loading" : ""}
-              onClick={() => withActionLoading("auto-layout", autoLayoutNodes)}
-            >
-              Auto Layout
-            </button>
-            <button
-              disabled={!selectedNode || String(selectedNode.data?.type || "") === "start"}
-              onClick={handleDuplicateSelectedNode}
-            >
-              Duplicate Node
-            </button>
-            <button onClick={() => setSnapToGrid((value) => !value)}>{snapToGrid ? "Snap: On" : "Snap: Off"}</button>
-            <button
-              disabled={isActionLoading("save-draft")}
-              className={isActionLoading("save-draft") ? "is-loading" : ""}
-              onClick={() => withActionLoading("save-draft", handleSave)}
-            >
-              {isActionLoading("save-draft") ? "Saving..." : "Save Draft"}
-            </button>
-            <button
-              disabled={isActionLoading("publish")}
-              className={isActionLoading("publish") ? "is-loading" : ""}
-              onClick={() => withActionLoading("publish", handlePublish)}
-            >
-              {isActionLoading("publish") ? "Publishing..." : "Publish"}
-            </button>
-            <button
-              disabled={isActionLoading("test-run")}
-              className={isActionLoading("test-run") ? "is-loading" : ""}
-              onClick={() => withActionLoading("test-run", () => runWorkflow(true))}
-            >
-              {isActionLoading("test-run") ? "Running..." : "Test Run"}
-            </button>
-            <button
-              className={`primary ${isActionLoading("run") ? "is-loading" : ""}`}
-              disabled={isActionLoading("run")}
-              onClick={() => withActionLoading("run", () => runWorkflow(false))}
-            >
-              {isActionLoading("run") ? "Running..." : "Run"}
-            </button>
-          </div>
-        </div>
+        <CanvasToolbar
+          nodeSearch={nodeSearch}
+          onNodeSearchChange={setNodeSearch}
+          quickAddInputRef={quickAddInputRef}
+          filteredNodeOptions={filteredNodeOptions}
+          onQuickAddFirstNode={handleQuickAddFirstNode}
+          onQuickAddNode={handleQuickAddNode}
+          isActionLoading={isActionLoading}
+          onRecordWeb={() => withActionLoading("record-web", handleStartRecorder)}
+          onRecordDesktop={() =>
+            withActionLoading("record-desktop", () => (desktopRecording ? handleDesktopRecordStop() : handleDesktopRecordStart()))
+          }
+          desktopRecording={desktopRecording}
+          onAutoLayout={() => withActionLoading("auto-layout", autoLayoutNodes)}
+          onDuplicateSelectedNode={handleDuplicateSelectedNode}
+          canDuplicateSelectedNode={Boolean(selectedNode) && String(selectedNode?.data?.type || "") !== "start"}
+          snapToGrid={snapToGrid}
+          onToggleSnap={() => setSnapToGrid((value) => !value)}
+          onSaveDraft={() => withActionLoading("save-draft", () => handleSave())}
+          onPublish={() => withActionLoading("publish", handlePublish)}
+          onTestRun={() => withActionLoading("test-run", () => runWorkflow(true))}
+          onRun={() => withActionLoading("run", () => runWorkflow(false))}
+          isDirty={isDirty}
+          lastAutoSaveAt={lastAutoSaveAt}
+        />
 
         <div className="metrics-strip">
           <div className="metric-card">

@@ -1,4 +1,6 @@
 import type {
+  ActivityCatalog,
+  AutopilotPlan,
   WorkflowDefinition,
   WorkflowRecord,
   WorkflowRunDetail,
@@ -127,6 +129,17 @@ export function getTemplates() {
   return request<Array<{ id: string; name: string; category: string; description?: string; definition: WorkflowDefinition }>>(
     "/api/templates"
   );
+}
+
+export function getActivities() {
+  return request<ActivityCatalog>("/api/activities");
+}
+
+export function generateAutopilotPlan(payload: { prompt: string; name?: string }) {
+  return request<AutopilotPlan>("/api/autopilot/plan", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function createWorkflowFromTemplate(payload: { templateId: string; name?: string }) {
