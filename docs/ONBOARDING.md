@@ -66,3 +66,5 @@ Use `.github/pull_request_template.md` and include:
 - Open a draft PR early with assumptions.
 - Link relevant files and failing tests directly.
 - Keep scope explicit to speed up review.
+
+Tip: prefer small PRs (<300 changed lines) to keep review cycles fast.
