@@ -97,6 +97,7 @@ import { filterNodeOptions, NODE_OPTIONS } from "./lib/nodeCatalog";
 import { buildPersistedDefinition, hashDefinition } from "./lib/workflowDraft";
 import type {
   ActivityCatalog,
+  AutopilotPlan,
   MiningSummary,
   OrchestratorJob,
   OrchestratorOverview,
@@ -375,6 +376,7 @@ export default function App() {
   const [templateSearch, setTemplateSearch] = useState("");
   const [autopilotPrompt, setAutopilotPrompt] = useState("");
   const [autopilotWorkflowName, setAutopilotWorkflowName] = useState("");
+  const [autopilotPlanDraft, setAutopilotPlanDraft] = useState<AutopilotPlan | null>(null);
   const [activityCatalog, setActivityCatalog] = useState<ActivityCatalog | null>(null);
   const [nodeSearch, setNodeSearch] = useState("");
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState("all");
@@ -1250,7 +1252,7 @@ export default function App() {
     await refreshDashboard();
   };
 
-  const handleCreateFromAutopilot = async () => {
+  const handleGenerateAutopilotPlan = async () => {
     const prompt = autopilotPrompt.trim();
     if (prompt.length < 6) {
       setFeedback("Describe the automation in at least 6 characters", "error");
@@ -1260,22 +1262,33 @@ export default function App() {
       prompt,
       name: autopilotWorkflowName.trim() || undefined
     });
+    setAutopilotPlanDraft(plan as AutopilotPlan);
+    const confidencePct = Math.round(Math.max(0, Math.min(1, Number(plan.confidence || 0))) * 100);
+    setFeedback(`Autopilot plan generated (${confidencePct}% confidence). Review and confirm before creating.`, "success");
+    if (plan.warnings.length) {
+      setFeedback(`Autopilot note: ${plan.warnings[0]}`, "info");
+    }
+  };
+
+  const handleConfirmAutopilotPlan = async () => {
+    if (!autopilotPlanDraft) {
+      setFeedback("Generate an Autopilot plan first", "error");
+      return;
+    }
     const created = await createWorkflow({
-      name: plan.name,
-      definition: plan.definition
+      name: autopilotPlanDraft.name,
+      definition: autopilotPlanDraft.definition
     });
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
     setAutopilotPrompt("");
     setAutopilotWorkflowName("");
-    const capabilityPreview = plan.capabilities.slice(0, 3).join(", ");
+    setAutopilotPlanDraft(null);
+    const capabilityPreview = autopilotPlanDraft.capabilities.slice(0, 3).join(", ");
     setFeedback(
-      `Autopilot draft created${capabilityPreview ? ` (${capabilityPreview}${plan.capabilities.length > 3 ? ", ..." : ""})` : ""}`,
+      `Autopilot draft created${capabilityPreview ? ` (${capabilityPreview}${autopilotPlanDraft.capabilities.length > 3 ? ", ..." : ""})` : ""}`,
       "success"
     );
-    if (plan.warnings.length) {
-      setFeedback(`Autopilot note: ${plan.warnings[0]}`, "info");
-    }
     await refreshDashboard();
   };
 
@@ -1310,6 +1323,7 @@ export default function App() {
     setActivityCatalog(null);
     setAutopilotPrompt("");
     setAutopilotWorkflowName("");
+    setAutopilotPlanDraft(null);
     setSchedules([]);
     setScheduleDependsOnId("");
     setMaintenanceEnabled(false);
@@ -2768,22 +2782,85 @@ export default function App() {
         <small>Describe desired automation in plain language. ForgeFlow will generate a draft workflow.</small>
         <input
           value={autopilotWorkflowName}
-          onChange={(e) => setAutopilotWorkflowName(e.target.value)}
+          onChange={(e) => {
+            setAutopilotWorkflowName(e.target.value);
+            setAutopilotPlanDraft(null);
+          }}
           placeholder="Workflow name (optional)"
         />
         <textarea
           value={autopilotPrompt}
-          onChange={(e) => setAutopilotPrompt(e.target.value)}
+          onChange={(e) => {
+            setAutopilotPrompt(e.target.value);
+            setAutopilotPlanDraft(null);
+          }}
           rows={4}
           placeholder="Example: Open CRM portal, extract pending invoices, clean with AI, send to API, then request manager approval."
         />
         <button
           disabled={isActionLoading("autopilot")}
           className={isActionLoading("autopilot") ? "is-loading" : ""}
-          onClick={() => withActionLoading("autopilot", handleCreateFromAutopilot)}
+          onClick={() => withActionLoading("autopilot", handleGenerateAutopilotPlan)}
         >
           {isActionLoading("autopilot") ? "Generating..." : "Generate with Autopilot"}
         </button>
+        {autopilotPlanDraft ? (
+          <div className="autopilot-plan">
+            <strong>{autopilotPlanDraft.name}</strong>
+            <small>
+              Confidence: {Math.round(Math.max(0, Math.min(1, Number(autopilotPlanDraft.confidence || 0))) * 100)}%
+              {autopilotPlanDraft.fallbackUsed ? " · fallback template applied" : ""}
+            </small>
+            <small>
+              Capabilities: {autopilotPlanDraft.capabilities.length ? autopilotPlanDraft.capabilities.join(", ") : "none"}
+            </small>
+            {autopilotPlanDraft.warnings.length ? (
+              <div className="autopilot-plan-warnings">
+                {autopilotPlanDraft.warnings.slice(0, 4).map((warning, index) => (
+                  <small key={`${warning}-${index}`}>{warning}</small>
+                ))}
+              </div>
+            ) : null}
+            <small>Node confidence</small>
+            <div className="autopilot-plan-nodes">
+              {autopilotPlanDraft.nodeInsights.slice(0, 12).map((insight) => (
+                <div key={insight.nodeId} className="autopilot-plan-node">
+                  <strong>{insight.label}</strong>
+                  <small>
+                    {insight.nodeType} · {Math.round(insight.confidence * 100)}%
+                  </small>
+                  {insight.warnings[0] ? <small>{insight.warnings[0]}</small> : null}
+                </div>
+              ))}
+            </div>
+            {autopilotPlanDraft.fallbackOptions?.length ? (
+              <>
+                <small>Fallback starter options</small>
+                <div className="autopilot-plan-fallbacks">
+                  {autopilotPlanDraft.fallbackOptions.slice(0, 3).map((option) => (
+                    <div key={option.id} className="autopilot-plan-node">
+                      <strong>{option.name}</strong>
+                      <small>{option.description}</small>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            <div className="autopilot-plan-actions">
+              <button
+                disabled={isActionLoading("autopilot-create")}
+                className={isActionLoading("autopilot-create") ? "is-loading" : ""}
+                onClick={() => withActionLoading("autopilot-create", handleConfirmAutopilotPlan)}
+              >
+                {isActionLoading("autopilot-create") ? "Creating..." : "Create Draft Workflow"}
+              </button>
+              <button className="secondary" onClick={() => setAutopilotPlanDraft(null)}>
+                Discard Plan
+              </button>
+            </div>
+            <small>Review is required before creating the workflow draft.</small>
+          </div>
+        ) : null}
         {activityCatalog ? (
           <>
             <small>

@@ -12,7 +12,7 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 - Core editor UX: undo/redo, duplicate, edge disconnect, auto-layout, and JSON import/export
 - Web automation (Playwright) and desktop automation (agent service)
 - Recorder flows for web and desktop action capture with review-before-insert draft editing
-- Autopilot workflow generation from natural-language prompts
+- Autopilot workflow generation from natural-language prompts with confidence scoring and confirm-before-create review
 - AI nodes: `transform_llm`, `document_understanding`, `clipboard_ai_transfer`
 - Integrations (`http_api`, `postgresql`, `mysql`, `mongodb`, `google_sheets`, `airtable`, `s3`)
 - Orchestrator queue with attended/unattended robots and dispatch lifecycle
