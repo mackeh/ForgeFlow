@@ -1,6 +1,6 @@
 # Contributor Onboarding
 
-This guide helps new contributors deliver a first high-quality PR quickly.
+This guide helps new contributors ship a first high-quality PR quickly.
 
 ## 1. Prerequisites
 - Docker + Docker Compose
@@ -20,51 +20,62 @@ Default local login:
 - username: `local`
 - password: `localpass`
 
-## 3. Understand the Repo Fast
-- `apps/web`: workflow studio UI
-- `apps/server`: API, runner, scheduling, auth, orchestration
-- `apps/agent`: desktop automation bridge
-- `docs`: architecture, API, deployment, contribution docs
+## 3. Do the 10-Minute Tutorial First
+Use the guided tutorial and starter workflow:
+- `docs/tutorials/FIRST_AUTOMATION_10_MIN.md`
+- `docs/examples/workflows/first-automation.workflow.json`
 
-## 4. Choose a First Task
-Recommended starter contributions:
-- UI improvements in `apps/web/src/components`
-- Add/extend node behavior in `apps/server/src/lib/runner.ts`
-- Add endpoint + tests in `apps/server/src/index.ts` + `src/lib/*.test.ts`
-- Improve docs/tutorials in `docs/*`
+This gives you a known-good baseline before deeper changes.
 
-## 5. Development Workflow
-1. Create branch
+## 4. Choose a Contribution Track
+
+### Web/UI track
+- Primary files: `apps/web/src/*`
+- Typical work: canvas UX, inspector fields, sidebar features
+- Required validation:
+```bash
+cd apps/web && npm test && npm run build
+```
+
+### Server/Runtime track
+- Primary files: `apps/server/src/*`
+- Typical work: runner nodes, APIs, authz, orchestrator logic
+- Required validation:
+```bash
+cd apps/server && npm test && npm run build
+```
+
+### Docs/Enablement track
+- Primary files: `README.md`, `docs/*`, `.github/*template*`
+- Typical work: tutorials, examples, contribution process, demo scripts
+- Required validation: link/command accuracy and consistency with current behavior
+
+## 5. Use Repository Templates
+Start from templates in `docs/templates` when relevant:
+- `activity-proposal.md`
+- `node-implementation-checklist.md`
+- `demo-script-template.md`
+
+## 6. Pull Request Path
+1. Create branch:
 ```bash
 git checkout -b feat/<short-topic>
 ```
-2. Implement change
-3. Run validation:
-```bash
-cd apps/server && npm test && npm run build
-cd apps/web && npm test && npm run build
-```
-4. Update docs for behavior/API changes
-5. Commit with clear message (example: `feat(orchestrator): add queue status sync`)
+2. Implement focused changes.
+3. Run required validation for your track.
+4. Update docs affected by behavior/API/UI changes.
+5. Fill `.github/pull_request_template.md` completely.
 
-## 6. Pull Request Checklist
-Use `.github/pull_request_template.md` and include:
-- What changed and why
-- How to test (exact commands)
-- Screenshots/GIF for UI changes
-- Docs updates performed
-- Risk/rollback notes for non-trivial changes
-
-## 7. Community Standards in This Repo
-- Keep commits focused and reviewable.
-- Add tests for new logic and edge cases.
-- Validate permissions for protected API changes.
-- Write audit events for sensitive/admin actions.
-- Keep docs current with features.
+## 7. Definition of Done (Required)
+- [ ] Changes are scoped and reviewable.
+- [ ] Required tests/builds pass.
+- [ ] User-facing/API behavior is documented.
+- [ ] Demo/tutorial updates are included when UX flows change.
+- [ ] PR includes rollback/risk notes.
 
 ## 8. Where to Ask Questions
 - Open a draft PR early with assumptions.
-- Link relevant files and failing tests directly.
-- Keep scope explicit to speed up review.
+- Link exact files and failing commands.
+- Keep scope explicit to reduce review churn.
 
-Tip: prefer small PRs (<300 changed lines) to keep review cycles fast.
+Tip: prefer small PRs (<300 changed lines) unless the feature requires a larger vertical slice.

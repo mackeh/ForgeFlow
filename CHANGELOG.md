@@ -15,12 +15,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Web recorder stop endpoint (`/api/recorders/web/stop`) and recorder navigation event capture.
 - Recorder draft review panel with reorder/edit/skip controls before inserting recorded steps.
 - Autopilot plan diagnostics: overall confidence score, node-level insights, and fallback template options.
+- Contributor onboarding package: 10-minute tutorial, starter workflow file, and reusable docs templates.
 
 ### Changed
 - CI now includes browser smoke validation (`Web E2E Smoke`).
 - Web editor keyboard shortcuts now include undo/redo and selection-aware delete behavior.
 - Web recorder now follows capture -> review -> insert flow instead of immediate node injection.
 - Autopilot now requires explicit confirm-before-create flow and uses richer starter templates for vague prompts.
+- Onboarding/contributing docs now use change-type contribution paths and an explicit definition-of-done checklist.
 
 ## [1.0.7] - 2026-02-13
 

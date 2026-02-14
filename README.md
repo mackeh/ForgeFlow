@@ -57,9 +57,10 @@ Use these guided demos to evaluate the platform quickly:
 
 ## Contributor Onboarding
 New contributors should start here:
-1. `docs/ONBOARDING.md` (30-minute setup + first contribution path)
-2. `docs/CONTRIBUTING.md` (standards, testing, QA checklist)
-3. `.github/pull_request_template.md` (PR structure used in this repo)
+1. `docs/tutorials/FIRST_AUTOMATION_10_MIN.md` (fast baseline walkthrough)
+2. `docs/ONBOARDING.md` (setup + contribution tracks)
+3. `docs/CONTRIBUTING.md` (standards, definition of done, PR workflow)
+4. `.github/pull_request_template.md` (PR structure used in this repo)
 
 Good first areas:
 - UI polish and node inspector UX (`apps/web/src`)
@@ -127,10 +128,13 @@ Tag pushes (`v*.*.*`) trigger `.github/workflows/release.yml`, which reruns vali
 - `docs/README.md`
 - `docs/DEMOS.md`
 - `docs/ONBOARDING.md`
+- `docs/tutorials/FIRST_AUTOMATION_10_MIN.md`
+- `docs/examples/workflows/first-automation.workflow.json`
 - `docs/ARCHITECTURE.md`
 - `docs/API_REFERENCE.md`
 - `docs/DEPLOYMENT.md`
 - `docs/CONTRIBUTING.md`
+- `docs/templates/*`
 - `AGENTS.md` (repository contributor guide)
 - `CHANGELOG.md`
 - `CODE_OF_CONDUCT.md`
