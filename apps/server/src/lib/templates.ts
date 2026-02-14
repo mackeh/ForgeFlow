@@ -164,10 +164,10 @@ const templates: WorkflowTemplate[] = [
           position: { x: 1580, y: 80 },
           data: {
             type: "conditional_branch",
-            label: "Amount > 10000?",
+            label: "Amount > {{setup.approval_threshold}}?",
             inputKey: "invoiceAmount",
             operator: "gt",
-            right: 10000,
+            right: "{{setup.approval_threshold}}",
             trueTarget: "approval",
             falseTarget: "sync"
           }
@@ -189,7 +189,7 @@ const templates: WorkflowTemplate[] = [
           data: {
             type: "integration_request",
             label: "Sync to Finance System",
-            integrationId: "finance_api",
+            integrationId: "{{setup.finance_api}}",
             method: "POST",
             path: "/invoices",
             body: {
@@ -263,7 +263,7 @@ const templates: WorkflowTemplate[] = [
           id: "navigate",
           type: "action",
           position: { x: 330, y: 80 },
-          data: { type: "playwright_navigate", label: "Open Source Portal", url: "https://example.com/reports/orders" }
+          data: { type: "playwright_navigate", label: "Open Source Portal", url: "{{setup.source_url}}" }
         },
         {
           id: "extract",
@@ -272,7 +272,7 @@ const templates: WorkflowTemplate[] = [
           data: {
             type: "playwright_extract",
             label: "Extract Table Data",
-            selector: "table tbody",
+            selector: "{{setup.table_selector}}",
             saveAs: "rawRows"
           }
         },
@@ -310,7 +310,7 @@ const templates: WorkflowTemplate[] = [
             type: "http_request",
             label: "POST Rows",
             method: "POST",
-            url: "https://example.com/api/order-sync",
+            url: "{{setup.target_api_url}}",
             body: { rows: "{{cleanRows}}" },
             saveAs: "syncResult"
           }
@@ -409,7 +409,7 @@ const templates: WorkflowTemplate[] = [
             type: "http_request",
             label: "Send to Import API",
             method: "POST",
-            url: "https://example.com/api/csv-import",
+            url: "{{setup.import_api_url}}",
             body: { rows: "{{normalizedRows}}" },
             saveAs: "importResult"
           }
@@ -534,7 +534,7 @@ const templates: WorkflowTemplate[] = [
           data: {
             type: "integration_request",
             label: "Create Ticket",
-            integrationId: "helpdesk_api",
+            integrationId: "{{setup.helpdesk_api}}",
             method: "POST",
             path: "/tickets",
             body: {
@@ -604,7 +604,7 @@ const templates: WorkflowTemplate[] = [
             type: "http_request",
             label: "Call Health Endpoint",
             method: "GET",
-            url: "https://example.com/health",
+            url: "{{setup.health_url}}",
             saveAs: "healthPayload"
           }
         },
@@ -643,7 +643,7 @@ const templates: WorkflowTemplate[] = [
             type: "http_request",
             label: "Send Alert",
             method: "POST",
-            url: "https://example.com/webhooks/alerts",
+            url: "{{setup.alert_webhook}}",
             body: {
               service: "forgeflow",
               status: "{{healthState}}",
@@ -1248,6 +1248,51 @@ function withResolvedSetup(template: WorkflowTemplate): WorkflowTemplate & { set
     ...template,
     setup: template.setup || inferTemplateSetup(template)
   };
+}
+
+function mergeTemplateSetupValues(setup: TemplateSetupGuide, overrides?: Record<string, unknown>) {
+  const merged: Record<string, unknown> = {};
+  for (const field of setup.requiredInputs || []) {
+    if (field.defaultValue !== undefined) {
+      merged[field.id] = field.defaultValue;
+    }
+  }
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim().length === 0) continue;
+    merged[key] = value;
+  }
+  return merged;
+}
+
+function applySetupPlaceholders(value: unknown, setupValues: Record<string, unknown>): unknown {
+  if (typeof value === "string") {
+    const fullMatch = value.match(/^{{\s*setup\.([a-zA-Z0-9_-]+)\s*}}$/);
+    if (fullMatch?.[1]) {
+      const resolved = setupValues[fullMatch[1]];
+      return resolved !== undefined ? resolved : value;
+    }
+    return value.replace(/{{\s*setup\.([a-zA-Z0-9_-]+)\s*}}/g, (_all, key: string) => {
+      const resolved = setupValues[key];
+      return resolved === undefined ? "" : String(resolved);
+    });
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => applySetupPlaceholders(item, setupValues));
+  }
+  if (value && typeof value === "object") {
+    const next: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      next[key] = applySetupPlaceholders(nested, setupValues);
+    }
+    return next;
+  }
+  return value;
+}
+
+export function renderWorkflowTemplateDefinition(template: WorkflowTemplate & { setup: TemplateSetupGuide }, setupValues?: Record<string, unknown>) {
+  const mergedSetupValues = mergeTemplateSetupValues(template.setup, setupValues);
+  return applySetupPlaceholders(template.definition, mergedSetupValues) as Record<string, unknown>;
 }
 
 export function listWorkflowTemplateDefinitions() {

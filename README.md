@@ -73,6 +73,8 @@ Create from UI:
 3. Complete `Template Setup Wizard` fields and click `Validate Setup`.
 4. Click `Create Workflow`.
 
+Template setup values are injected into the created workflow definition (URLs, selectors, integration IDs, thresholds, etc.), so starters are immediately environment-specific.
+
 ## Contributor Onboarding
 New contributors should start here:
 1. `docs/tutorials/FIRST_AUTOMATION_10_MIN.md` (fast baseline walkthrough)

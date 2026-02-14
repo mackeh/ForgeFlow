@@ -103,6 +103,7 @@ Goal: Show first-time user guidance from template selection to run readiness.
 3. Click `Validate Setup` and confirm checks show `PASS`.
 4. Click `Copy Sample Input` and inspect JSON payload.
 5. Start `Starter Walkthrough` and progress through all steps.
+6. Create workflow and inspect key nodes to confirm setup values were injected.
 
 Expected outcome:
 - Setup friction is reduced with explicit required fields/checks.

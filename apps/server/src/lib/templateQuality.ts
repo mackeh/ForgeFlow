@@ -1,7 +1,14 @@
-import { listWorkflowTemplateDefinitions, type WorkflowTemplate } from "./templates.js";
+import { listWorkflowTemplateDefinitions, renderWorkflowTemplateDefinition, type WorkflowTemplate } from "./templates.js";
 
 function isNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasSetupPlaceholder(value: unknown): boolean {
+  if (typeof value === "string") return /{{\s*setup\.[a-zA-Z0-9_-]+\s*}}/.test(value);
+  if (Array.isArray(value)) return value.some((item) => hasSetupPlaceholder(item));
+  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).some((nested) => hasSetupPlaceholder(nested));
+  return false;
 }
 
 export function validateWorkflowTemplate(template: WorkflowTemplate & { setup?: any }) {
@@ -71,6 +78,13 @@ export function validateWorkflowTemplate(template: WorkflowTemplate & { setup?: 
     if (connectionChecks.length === 0) errors.push("Template setup requires at least one connection check");
     if (!sampleInput || typeof sampleInput !== "object" || Array.isArray(sampleInput)) {
       errors.push("Template setup sampleInput must be an object");
+    }
+  }
+
+  if (template.setup) {
+    const rendered = renderWorkflowTemplateDefinition(template as WorkflowTemplate & { setup: any });
+    if (hasSetupPlaceholder(rendered)) {
+      errors.push("Rendered definition still contains unresolved setup placeholders");
     }
   }
 

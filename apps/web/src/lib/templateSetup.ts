@@ -35,6 +35,23 @@ export function integrationExists(
   });
 }
 
+export function resolveIntegrationCheckId(args: {
+  setup?: TemplateSetupGuide | null;
+  values?: Record<string, string>;
+  integrationId?: string;
+}) {
+  const integrationId = String(args.integrationId || "").trim();
+  if (!integrationId) return "";
+  const setup = args.setup;
+  const values = args.values || {};
+  const mappedField = (setup?.requiredInputs || []).find(
+    (field) => field.kind === "integration" && (field.defaultValue === integrationId || field.id === integrationId)
+  );
+  if (!mappedField) return integrationId;
+  const override = String(values[mappedField.id] || "").trim();
+  return override || mappedField.defaultValue || integrationId;
+}
+
 export function buildTemplateReadiness(args: {
   setup?: TemplateSetupGuide | null;
   values?: Record<string, string>;
@@ -50,9 +67,14 @@ export function buildTemplateReadiness(args: {
     if (check.type === "preflight") {
       return { id: check.id, ok: preflightReady };
     }
+    const integrationTarget = resolveIntegrationCheckId({
+      setup,
+      values,
+      integrationId: check.integrationId
+    });
     return {
       id: check.id,
-      ok: integrationExists(check.integrationId, args.integrations)
+      ok: integrationExists(integrationTarget, args.integrations)
     };
   });
 

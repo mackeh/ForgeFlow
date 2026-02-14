@@ -35,7 +35,7 @@ import {
   updateSchedule
 } from "./lib/scheduleStore.js";
 import { buildSchedulePreview, buildUpcomingRuns, listSchedulePresets } from "./lib/schedulePreview.js";
-import { getWorkflowTemplate, listWorkflowTemplates } from "./lib/templates.js";
+import { getWorkflowTemplate, listWorkflowTemplates, renderWorkflowTemplateDefinition } from "./lib/templates.js";
 import { listActivities } from "./lib/activities.js";
 import { buildAutopilotPlan } from "./lib/autopilot.js";
 import { understandDocument } from "./lib/documentUnderstanding.js";
@@ -850,7 +850,8 @@ app.post("/api/orchestrator/jobs/:id/sync", canManageOrchestrator, async (req, r
 app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => {
   const schema = z.object({
     templateId: z.string(),
-    name: z.string().optional()
+    name: z.string().optional(),
+    setupValues: z.record(z.any()).optional()
   });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -863,7 +864,8 @@ app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => 
     return;
   }
 
-  const typedTemplate = asWorkflowDefinition(template.definition);
+  const renderedDefinition = renderWorkflowTemplateDefinition(template, parsed.data.setupValues);
+  const typedTemplate = asWorkflowDefinition(renderedDefinition);
   const workflow = await prisma.workflow.create({
     data: {
       name: parsed.data.name?.trim() || template.name,
@@ -880,7 +882,8 @@ app.post("/api/workflows/from-template", canWriteWorkflows, async (req, res) => 
     resourceId: workflow.id,
     metadata: {
       templateId: template.id,
-      name: workflow.name
+      name: workflow.name,
+      setupKeys: Object.keys(parsed.data.setupValues || {})
     }
   });
   res.json(workflow);
