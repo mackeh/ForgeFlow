@@ -8,6 +8,7 @@ ForgeFlow is a local-first automation platform for web and desktop workflows.
 It combines a drag-and-drop workflow studio, resilient execution, AI-assisted automation, and centralized operations in one stack.
 
 ## What You Get
+
 - Visual workflow builder (React Flow)
 - Core editor UX: undo/redo, duplicate, edge disconnect, auto-layout, and JSON import/export
 - Web automation (Playwright) and desktop automation (agent service)
@@ -21,8 +22,23 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 - Process/task mining summary (bottlenecks, variants, opportunity scoring)
 - Draft/publish lifecycle, rollback, schedules, approvals, and resume-from-failure
 - RBAC, optional TOTP 2FA, encrypted secrets, audit log, webhooks, Prometheus metrics
+- RBAC, optional TOTP 2FA, encrypted secrets, audit log, webhooks, Prometheus metrics
+
+## Screenshots
+
+<div align="center">
+  <img src="docs/images/dashboard.png" alt="Dashboard" width="800"/>
+  <p><em>Real-time Dashboard</em></p>
+  
+  <img src="docs/images/workflow_editor.png" alt="Workflow Editor" width="800"/>
+  <p><em>Visual Workflow Builder</em></p>
+
+  <img src="docs/images/runs.png" alt="Execution Runs" width="800"/>
+  <p><em>Detailed Execution Logs</em></p>
+</div>
 
 ## Services
+
 - `web`: `http://localhost:5173`
 - `server`: `http://localhost:8080`
 - `agent`: `http://localhost:7001`
@@ -31,15 +47,19 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 - `ollama`: local LLM runtime
 
 ## Quick Start
+
 1. Start everything:
+
 ```bash
 ./start.sh
 ```
+
 2. Open `http://localhost:5173`
 3. Sign in with `.env` credentials (default: `local` / `localpass`)
 4. Build your first flow and run `Test Run`
 
 Power shortcuts:
+
 - `Ctrl/Cmd+K` quick-add node search
 - `Ctrl/Cmd+Z` undo
 - `Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redo
@@ -50,7 +70,9 @@ Power shortcuts:
 - `Delete` remove selected node or selected edge
 
 ## Demo Flows
+
 Use these guided demos to evaluate the platform quickly:
+
 - `docs/DEMOS.md#demo-1-autopilot-invoice-triage`
 - `docs/DEMOS.md#demo-2-orchestrator-unattended-queue`
 - `docs/DEMOS.md#demo-3-document-understanding-and-clipboard-ai`
@@ -59,6 +81,7 @@ Use these guided demos to evaluate the platform quickly:
 - `docs/DEMOS.md#demo-6-real-world-starter-pack`
 
 ## Production Starter Templates
+
 Use built-in templates as a fast path from idea to first successful run:
 
 - `invoice-intake-approval`: Parse invoice text, classify risk, branch to approval, and sync approved data.
@@ -68,6 +91,7 @@ Use built-in templates as a fast path from idea to first successful run:
 - `scheduled-health-check-alert`: Run scheduled API checks, classify service state, and alert on degradation.
 
 Create from UI:
+
 1. Open `Templates` in the left sidebar.
 2. Select a starter template.
 3. Complete `Template Setup Wizard` fields and click `Validate Setup`.
@@ -76,68 +100,83 @@ Create from UI:
 Template setup values are injected into the created workflow definition (URLs, selectors, integration IDs, thresholds, etc.), so starters are immediately environment-specific.
 
 ## Contributor Onboarding
+
 New contributors should start here:
+
 1. `docs/tutorials/FIRST_AUTOMATION_10_MIN.md` (fast baseline walkthrough)
 2. `docs/ONBOARDING.md` (setup + contribution tracks)
 3. `docs/CONTRIBUTING.md` (standards, definition of done, PR workflow)
 4. `.github/pull_request_template.md` (PR structure used in this repo)
 
 Good first areas:
+
 - UI polish and node inspector UX (`apps/web/src`)
 - New activity handlers (`apps/server/src/lib/runner.ts`)
 - New API endpoints with `zod` validation (`apps/server/src/index.ts`)
 - Docs and tutorials (`docs/*`)
 
 ## Development Commands
+
 Start stack:
+
 ```bash
 ./start.sh
 ```
 
 Start without auto-update:
+
 ```bash
 AUTO_UPDATE=0 ./start.sh
 ```
 
 Run backend tests:
+
 ```bash
 cd apps/server && npm test
 ```
 
 Run web tests:
+
 ```bash
 cd apps/web && npm test
 ```
 
 Run web Playwright smoke tests:
+
 ```bash
 cd apps/web && npx playwright install --with-deps chromium && npm run test:e2e
 ```
 
 Build server + web:
+
 ```bash
 cd apps/server && npm run build
 cd apps/web && npm run build
 ```
 
 Stop stack:
+
 ```bash
 docker compose down
 ```
 
 ## Release Automation
+
 Create the next version tag from `main`:
+
 ```bash
 npm run release:patch
 ```
 
 Other bump modes:
+
 ```bash
 npm run release:minor
 npm run release:major
 ```
 
 Dry run:
+
 ```bash
 npm run release:patch -- --dry-run
 ```
@@ -145,6 +184,7 @@ npm run release:patch -- --dry-run
 Tag pushes (`v*.*.*`) trigger `.github/workflows/release.yml`, which reruns validation and publishes a GitHub release with generated notes.
 
 ## Documentation Map
+
 - `docs/README.md`
 - `docs/DEMOS.md`
 - `docs/ONBOARDING.md`
@@ -162,6 +202,7 @@ Tag pushes (`v*.*.*`) trigger `.github/workflows/release.yml`, which reruns vali
 - `LICENSE`
 
 ## API Areas
+
 - Auth: `/api/auth/*`
 - Workflows: `/api/workflows*`
 - Runs: `/api/runs*`
@@ -176,25 +217,32 @@ Tag pushes (`v*.*.*`) trigger `.github/workflows/release.yml`, which reruns vali
 - Secrets/Webhooks/Admin: `/api/secrets*`, `/api/webhooks*`, `/api/admin/*`
 
 ## Troubleshooting
+
 Module mismatch in containers:
+
 ```bash
 docker compose up --build --renew-anon-volumes
 ```
 
 Desktop automation issues on Linux:
+
 ```bash
 xhost +local:
 ```
+
 Then verify `.env` `DISPLAY` (usually `:0`).
 
 Missing Ollama model:
+
 ```bash
 docker exec -it rpa-ollama ollama pull llama3.2
 ```
 
 ## Support
+
 - https://buymeacoffee.com/mackeh
 
 ## Community Standards
+
 - Code of Conduct: `CODE_OF_CONDUCT.md`
 - License: `LICENSE` (MIT)
