@@ -1,0 +1,62 @@
+{
+  "schema": "forgeflow.workflow",
+  "version": 1,
+  "name": "Starter: First Automation",
+  "exportedAt": "2026-02-14T00:00:00.000Z",
+  "definition": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "action",
+        "position": { "x": 80, "y": 120 },
+        "data": { "type": "start", "label": "Start" }
+      },
+      {
+        "id": "set-order-id",
+        "type": "action",
+        "position": { "x": 330, "y": 120 },
+        "data": {
+          "type": "set_variable",
+          "label": "Set Order ID",
+          "key": "orderId",
+          "value": "PO-1001"
+        }
+      },
+      {
+        "id": "set-order-status",
+        "type": "action",
+        "position": { "x": 580, "y": 120 },
+        "data": {
+          "type": "set_variable",
+          "label": "Set Order Status",
+          "key": "orderStatus",
+          "value": "approved"
+        }
+      },
+      {
+        "id": "validate-order-status",
+        "type": "action",
+        "position": { "x": 830, "y": 120 },
+        "data": {
+          "type": "submit_guard",
+          "label": "Validate Order Status",
+          "inputKey": "orderStatus",
+          "schema": {
+            "type": "string",
+            "pattern": "^(approved|rejected)$"
+          }
+        }
+      }
+    ],
+    "edges": [
+      { "id": "e-start-set-order-id", "source": "start", "target": "set-order-id" },
+      { "id": "e-set-order-id-set-order-status", "source": "set-order-id", "target": "set-order-status" },
+      { "id": "e-set-order-status-validate-order-status", "source": "set-order-status", "target": "validate-order-status" }
+    ],
+    "execution": {
+      "globalTimeoutMs": 1800000,
+      "defaultRetries": 2,
+      "defaultNodeTimeoutMs": 30000
+    }
+  }
+}
