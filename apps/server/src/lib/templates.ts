@@ -17,6 +17,481 @@ const executionDefaults = {
 
 const templates: WorkflowTemplate[] = [
   {
+    id: "invoice-intake-approval",
+    name: "Invoice Intake + Approval",
+    description: "Extract invoice fields, validate risk, route high-value invoices to approval, then sync.",
+    category: "operations",
+    difficulty: "intermediate",
+    useCase: "Invoice capture and governance workflow with human oversight.",
+    tags: ["invoice", "document", "approval", "integration"],
+    definition: {
+      nodes: [
+        { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
+        {
+          id: "load-doc",
+          type: "action",
+          position: { x: 330, y: 80 },
+          data: {
+            type: "set_variable",
+            label: "Set Invoice Text",
+            key: "invoiceRawText",
+            value: "Invoice Number: INV-1001\nVendor: Example AB\nTotal: 12850.00\nCurrency: USD\nDue Date: 2026-03-01"
+          }
+        },
+        {
+          id: "understand",
+          type: "action",
+          position: { x: 580, y: 80 },
+          data: {
+            type: "document_understanding",
+            label: "Extract Invoice Fields",
+            inputKey: "invoiceRawText",
+            outputKey: "invoiceDoc",
+            expectedFields: ["invoice_number", "vendor", "total", "due_date", "currency"]
+          }
+        },
+        {
+          id: "normalize",
+          type: "action",
+          position: { x: 830, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Normalize Invoice Payload",
+            inputKey: "invoiceDoc",
+            outputKey: "invoicePayload",
+            strictJson: true
+          }
+        },
+        {
+          id: "guard",
+          type: "action",
+          position: { x: 1080, y: 80 },
+          data: {
+            type: "submit_guard",
+            label: "Validate Required Fields",
+            inputKey: "invoicePayload",
+            schema: {
+              type: "object",
+              required: ["invoice_number", "vendor", "total"],
+              properties: {
+                invoice_number: { type: "string", minLength: 1 },
+                vendor: { type: "string", minLength: 1 },
+                total: { type: "number" }
+              }
+            }
+          }
+        },
+        {
+          id: "amount",
+          type: "action",
+          position: { x: 1330, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Extract Invoice Amount",
+            inputKey: "invoicePayload",
+            outputKey: "invoiceAmount",
+            strictJson: false,
+            prompt: "Return only the numeric invoice total as plain text."
+          }
+        },
+        {
+          id: "branch",
+          type: "action",
+          position: { x: 1580, y: 80 },
+          data: {
+            type: "conditional_branch",
+            label: "Amount > 10000?",
+            inputKey: "invoiceAmount",
+            operator: "gt",
+            right: 10000,
+            trueTarget: "approval",
+            falseTarget: "sync"
+          }
+        },
+        {
+          id: "approval",
+          type: "action",
+          position: { x: 1830, y: 20 },
+          data: {
+            type: "manual_approval",
+            label: "Manager Approval",
+            message: "Approve high-value invoice before sync."
+          }
+        },
+        {
+          id: "sync",
+          type: "action",
+          position: { x: 1830, y: 140 },
+          data: {
+            type: "integration_request",
+            label: "Sync to Finance System",
+            integrationId: "finance_api",
+            method: "POST",
+            path: "/invoices",
+            body: {
+              invoice: "{{invoicePayload}}"
+            },
+            saveAs: "syncResponse"
+          }
+        }
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "load-doc" },
+        { id: "e2", source: "load-doc", target: "understand" },
+        { id: "e3", source: "understand", target: "normalize" },
+        { id: "e4", source: "normalize", target: "guard" },
+        { id: "e5", source: "guard", target: "amount" },
+        { id: "e6", source: "amount", target: "branch" },
+        { id: "e7", source: "branch", target: "approval" },
+        { id: "e8", source: "branch", target: "sync" },
+        { id: "e9", source: "approval", target: "sync" }
+      ],
+      execution: executionDefaults
+    }
+  },
+  {
+    id: "web-scrape-api-sync",
+    name: "Web Scrape -> API Sync",
+    description: "Scrape rows from a portal, normalize to schema, and sync downstream API.",
+    category: "web",
+    difficulty: "intermediate",
+    useCase: "Move structured data from browser UI into backend systems.",
+    tags: ["scrape", "playwright", "api", "sync"],
+    definition: {
+      nodes: [
+        { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
+        {
+          id: "navigate",
+          type: "action",
+          position: { x: 330, y: 80 },
+          data: { type: "playwright_navigate", label: "Open Source Portal", url: "https://example.com/reports/orders" }
+        },
+        {
+          id: "extract",
+          type: "action",
+          position: { x: 580, y: 80 },
+          data: {
+            type: "playwright_extract",
+            label: "Extract Table Data",
+            selector: "table tbody",
+            saveAs: "rawRows"
+          }
+        },
+        {
+          id: "normalize",
+          type: "action",
+          position: { x: 830, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Normalize Rows",
+            inputKey: "rawRows",
+            outputKey: "cleanRows",
+            strictJson: true
+          }
+        },
+        {
+          id: "guard",
+          type: "action",
+          position: { x: 1080, y: 80 },
+          data: {
+            type: "submit_guard",
+            label: "Validate Row Shape",
+            inputKey: "cleanRows",
+            schema: {
+              type: "array",
+              minItems: 1
+            }
+          }
+        },
+        {
+          id: "sync",
+          type: "action",
+          position: { x: 1330, y: 80 },
+          data: {
+            type: "http_request",
+            label: "POST Rows",
+            method: "POST",
+            url: "https://example.com/api/order-sync",
+            body: { rows: "{{cleanRows}}" },
+            saveAs: "syncResult"
+          }
+        }
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "navigate" },
+        { id: "e2", source: "navigate", target: "extract" },
+        { id: "e3", source: "extract", target: "normalize" },
+        { id: "e4", source: "normalize", target: "guard" },
+        { id: "e5", source: "guard", target: "sync" }
+      ],
+      execution: executionDefaults
+    }
+  },
+  {
+    id: "csv-cleanup-validation",
+    name: "CSV Cleanup + Validation",
+    description: "Import CSV rows, normalize records with AI, validate, and export to API.",
+    category: "data",
+    difficulty: "starter",
+    useCase: "Prepare spreadsheet exports for reliable downstream ingestion.",
+    tags: ["csv", "cleanup", "validation", "etl"],
+    definition: {
+      nodes: [
+        { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
+        {
+          id: "import",
+          type: "action",
+          position: { x: 330, y: 80 },
+          data: {
+            type: "data_import_csv",
+            label: "Import CSV",
+            text: "id,email,total\n1,alice@example.com,120.50\n2,bob@example.com,94.00",
+            outputKey: "csvRows"
+          }
+        },
+        {
+          id: "clean",
+          type: "action",
+          position: { x: 580, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Normalize CSV Rows",
+            inputKey: "csvRows",
+            outputKey: "normalizedRows",
+            strictJson: true
+          }
+        },
+        {
+          id: "validate",
+          type: "action",
+          position: { x: 830, y: 80 },
+          data: {
+            type: "submit_guard",
+            label: "Validate CSV Output",
+            inputKey: "normalizedRows",
+            schema: {
+              type: "array",
+              minItems: 1
+            }
+          }
+        },
+        {
+          id: "send",
+          type: "action",
+          position: { x: 1080, y: 80 },
+          data: {
+            type: "http_request",
+            label: "Send to Import API",
+            method: "POST",
+            url: "https://example.com/api/csv-import",
+            body: { rows: "{{normalizedRows}}" },
+            saveAs: "importResult"
+          }
+        }
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "import" },
+        { id: "e2", source: "import", target: "clean" },
+        { id: "e3", source: "clean", target: "validate" },
+        { id: "e4", source: "validate", target: "send" }
+      ],
+      execution: executionDefaults
+    }
+  },
+  {
+    id: "email-triage-ticket-create",
+    name: "Email Triage -> Ticket Create",
+    description: "Classify inbound email content, route urgent cases to approval, then create support ticket.",
+    category: "operations",
+    difficulty: "intermediate",
+    useCase: "Convert inbox workload into structured ticket operations.",
+    tags: ["email", "triage", "ticketing", "approval"],
+    definition: {
+      nodes: [
+        { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
+        {
+          id: "email",
+          type: "action",
+          position: { x: 330, y: 80 },
+          data: {
+            type: "set_variable",
+            label: "Set Email Body",
+            key: "emailBody",
+            value:
+              "Subject: Unable to process payroll export\\nPriority: high\\nBody: payroll API returns 500 for 3 hours."
+          }
+        },
+        {
+          id: "priority",
+          type: "action",
+          position: { x: 580, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Derive Ticket Priority",
+            inputKey: "emailBody",
+            outputKey: "ticketPriority",
+            strictJson: false,
+            prompt: "Return only one word priority: high, medium, or low."
+          }
+        },
+        {
+          id: "summary",
+          type: "action",
+          position: { x: 830, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Summarize Issue",
+            inputKey: "emailBody",
+            outputKey: "ticketSummary",
+            strictJson: false,
+            prompt: "Return one short support ticket summary sentence."
+          }
+        },
+        {
+          id: "branch",
+          type: "action",
+          position: { x: 1080, y: 80 },
+          data: {
+            type: "conditional_branch",
+            label: "High Priority?",
+            inputKey: "ticketPriority",
+            operator: "eq",
+            right: "high",
+            trueTarget: "approval",
+            falseTarget: "ticket"
+          }
+        },
+        {
+          id: "approval",
+          type: "action",
+          position: { x: 1330, y: 20 },
+          data: {
+            type: "manual_approval",
+            label: "Ops Lead Approval",
+            message: "Approve high-priority ticket creation."
+          }
+        },
+        {
+          id: "ticket",
+          type: "action",
+          position: { x: 1330, y: 140 },
+          data: {
+            type: "integration_request",
+            label: "Create Ticket",
+            integrationId: "helpdesk_api",
+            method: "POST",
+            path: "/tickets",
+            body: {
+              summary: "{{ticketSummary}}",
+              priority: "{{ticketPriority}}",
+              details: "{{emailBody}}"
+            },
+            saveAs: "ticketResponse"
+          }
+        }
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "email" },
+        { id: "e2", source: "email", target: "priority" },
+        { id: "e3", source: "priority", target: "summary" },
+        { id: "e4", source: "summary", target: "branch" },
+        { id: "e5", source: "branch", target: "approval" },
+        { id: "e6", source: "branch", target: "ticket" },
+        { id: "e7", source: "approval", target: "ticket" }
+      ],
+      execution: executionDefaults
+    }
+  },
+  {
+    id: "scheduled-health-check-alert",
+    name: "Scheduled Health-Check + Alert",
+    description: "Run a health probe, score service state, and trigger alert webhook for degraded state.",
+    category: "operations",
+    difficulty: "starter",
+    useCase: "Operational monitoring workflow for scheduled execution.",
+    tags: ["health-check", "alerting", "ops", "schedule"],
+    definition: {
+      nodes: [
+        { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
+        {
+          id: "check",
+          type: "action",
+          position: { x: 330, y: 80 },
+          data: {
+            type: "http_request",
+            label: "Call Health Endpoint",
+            method: "GET",
+            url: "https://example.com/health",
+            saveAs: "healthPayload"
+          }
+        },
+        {
+          id: "classify",
+          type: "action",
+          position: { x: 580, y: 80 },
+          data: {
+            type: "transform_llm",
+            label: "Classify Health State",
+            inputKey: "healthPayload",
+            outputKey: "healthState",
+            strictJson: false,
+            prompt: "Return only one word: healthy or degraded."
+          }
+        },
+        {
+          id: "branch",
+          type: "action",
+          position: { x: 830, y: 80 },
+          data: {
+            type: "conditional_branch",
+            label: "Degraded?",
+            inputKey: "healthState",
+            operator: "eq",
+            right: "degraded",
+            trueTarget: "alert",
+            falseTarget: "ok"
+          }
+        },
+        {
+          id: "alert",
+          type: "action",
+          position: { x: 1080, y: 20 },
+          data: {
+            type: "http_request",
+            label: "Send Alert",
+            method: "POST",
+            url: "https://example.com/webhooks/alerts",
+            body: {
+              service: "forgeflow",
+              status: "{{healthState}}",
+              payload: "{{healthPayload}}"
+            },
+            saveAs: "alertResult"
+          }
+        },
+        {
+          id: "ok",
+          type: "action",
+          position: { x: 1080, y: 140 },
+          data: {
+            type: "set_variable",
+            label: "Mark Healthy",
+            key: "alertResult",
+            value: "no-alert-required"
+          }
+        }
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "check" },
+        { id: "e2", source: "check", target: "classify" },
+        { id: "e3", source: "classify", target: "branch" },
+        { id: "e4", source: "branch", target: "alert" },
+        { id: "e5", source: "branch", target: "ok" }
+      ],
+      execution: executionDefaults
+    }
+  },
+  {
     id: "web-form-submit",
     name: "Web Form Submit",
     description: "Navigate, fill, submit, and validate form data with approval guard.",
