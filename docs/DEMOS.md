@@ -77,6 +77,24 @@ Expected outcome:
 - Inserted nodes are linked in sequence with stable defaults.
 - The resulting flow is cleaner than raw event capture.
 
+## Demo 6: Real-World Starter Pack
+Goal: Prove production-leaning workflows can be launched in minutes.
+
+1. Open `Templates` and create workflows from:
+   - `Invoice Intake + Approval`
+   - `Web Scrape -> API Sync`
+   - `CSV Cleanup + Validation`
+   - `Email Triage -> Ticket Create`
+   - `Scheduled Health Check + Alert`
+2. For each workflow, set integration URLs/credentials in inspector inputs.
+3. Run each in `Test Run` mode with representative sample payloads.
+4. Inspect branch behavior (approval paths, validation failures, degraded service alerts).
+
+Expected outcome:
+- Teams can start from realistic baseline flows rather than empty canvas.
+- Key automation patterns (ingest, transform, branch, sync, alert) are prewired.
+- Contributors can extend templates without changing core runtime behavior.
+
 ## Demo Assets
 - Template source: `apps/server/src/lib/templates.ts`
 - Node catalog: `apps/web/src/lib/nodeCatalog.ts`
@@ -88,5 +106,6 @@ Expected outcome:
 - Demo 3: 4-5 minutes
 - Demo 4: 4-6 minutes
 - Demo 5: 4-6 minutes
+- Demo 6: 8-10 minutes
 
-Total: 23-30 minutes for a full product walkthrough.
+Total: 31-40 minutes for a full product walkthrough.

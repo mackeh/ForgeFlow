@@ -60,6 +60,13 @@ Base URL (local): `http://localhost:8080`
 | POST | `/api/autopilot/plan` | `workflows:write` | Generate workflow draft definition from natural-language prompt |
 | POST | `/api/workflows/from-template` | `workflows:write` | Create workflow from template |
 
+Built-in production starter template IDs:
+- `invoice-intake-approval`
+- `web-scrape-api-sync`
+- `csv-cleanup-validation`
+- `email-triage-ticket-create`
+- `scheduled-health-check-alert`
+
 ## 6. Document Intelligence and Orchestrator
 
 | Method | Path | Permission | Description |

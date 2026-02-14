@@ -54,6 +54,21 @@ Use these guided demos to evaluate the platform quickly:
 - `docs/DEMOS.md#demo-3-document-understanding-and-clipboard-ai`
 - `docs/DEMOS.md#demo-4-workflow-builder-mvp-controls`
 - `docs/DEMOS.md#demo-5-recorder-draft-review-and-insert`
+- `docs/DEMOS.md#demo-6-real-world-starter-pack`
+
+## Production Starter Templates
+Use built-in templates as a fast path from idea to first successful run:
+
+- `invoice-intake-approval`: Parse invoice text, classify risk, branch to approval, and sync approved data.
+- `web-scrape-api-sync`: Scrape table data from a page and push rows to an API endpoint.
+- `csv-cleanup-validation`: Import CSV rows, normalize with AI, validate required fields, and branch bad records.
+- `email-triage-ticket-create`: Classify inbound email priority, summarize content, then create a ticket.
+- `scheduled-health-check-alert`: Run scheduled API checks, classify service state, and alert on degradation.
+
+Create from UI:
+1. Open `Templates` in the left sidebar.
+2. Select a starter template.
+3. Click `Create Workflow`.
 
 ## Contributor Onboarding
 New contributors should start here:
