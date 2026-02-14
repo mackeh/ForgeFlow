@@ -6,6 +6,8 @@ import type {
   OrchestratorJob,
   OrchestratorOverview,
   OrchestratorRobot,
+  WorkflowTemplateDetail,
+  WorkflowTemplateSummary,
   WorkflowDefinition,
   WorkflowRecord,
   WorkflowRunDetail,
@@ -131,9 +133,11 @@ export function createWorkflow(payload: { name: string; definition: WorkflowDefi
 }
 
 export function getTemplates() {
-  return request<Array<{ id: string; name: string; category: string; description?: string; definition: WorkflowDefinition }>>(
-    "/api/templates"
-  );
+  return request<WorkflowTemplateSummary[]>("/api/templates");
+}
+
+export function getTemplate(templateId: string) {
+  return request<WorkflowTemplateDetail>(`/api/templates/${encodeURIComponent(templateId)}`);
 }
 
 export function getActivities() {

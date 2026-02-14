@@ -25,6 +25,10 @@ Use the guided tutorial and starter workflow:
 - `docs/tutorials/FIRST_AUTOMATION_10_MIN.md`
 - `docs/examples/workflows/first-automation.workflow.json`
 
+In-app guidance:
+- Use `Starter Walkthrough` in the sidebar for the guided template -> setup -> test -> publish flow.
+- Use `Template Setup Wizard` inside `Templates` before creating from starter packs.
+
 This gives you a known-good baseline before deeper changes.
 
 ## 4. Choose a Contribution Track

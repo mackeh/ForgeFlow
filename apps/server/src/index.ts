@@ -545,6 +545,20 @@ app.get("/api/templates", canReadTemplates, async (_req, res) => {
   res.json(templates);
 });
 
+app.get("/api/templates/:templateId", canReadTemplates, async (req, res) => {
+  const templateId = String(req.params.templateId || "").trim();
+  if (!templateId) {
+    res.status(400).json({ error: "Template id is required" });
+    return;
+  }
+  const template = getWorkflowTemplate(templateId);
+  if (!template) {
+    res.status(404).json({ error: "Template not found" });
+    return;
+  }
+  res.json(template);
+});
+
 app.get("/api/activities", canReadActivities, async (_req, res) => {
   const catalog = await cache.getOrSet("activities:catalog", CACHE_TTL.templatesMs, async () => listActivities());
   res.json(catalog);

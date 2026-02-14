@@ -38,6 +38,10 @@ jobs:
         working-directory: apps/server
         run: npm test
 
+      - name: Template quality gate
+        working-directory: apps/server
+        run: npm run test:templates
+
       - name: Build
         working-directory: apps/server
         run: npm run build

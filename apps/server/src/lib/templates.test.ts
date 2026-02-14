@@ -18,6 +18,8 @@ test("listWorkflowTemplates exposes curated templates", () => {
   const sample = templates.find((template) => template.id === "invoice-intake-approval");
   assert.equal(typeof sample?.difficulty, "string");
   assert.equal(Array.isArray(sample?.tags), true);
+  assert.equal(Array.isArray((sample as any)?.setup?.requiredInputs), true);
+  assert.equal(Array.isArray((sample as any)?.setup?.connectionChecks), true);
 });
 
 test("getWorkflowTemplate returns full definition for known template", () => {
@@ -25,4 +27,5 @@ test("getWorkflowTemplate returns full definition for known template", () => {
   assert.ok(template);
   assert.equal(template?.name, "Web Scrape -> API Sync");
   assert.equal(Array.isArray((template?.definition as any).nodes), true);
+  assert.equal(typeof (template as any)?.setup?.sampleInput, "object");
 });

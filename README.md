@@ -13,6 +13,8 @@ It combines a drag-and-drop workflow studio, resilient execution, AI-assisted au
 - Web automation (Playwright) and desktop automation (agent service)
 - Recorder flows for web and desktop action capture with review-before-insert draft editing
 - Autopilot workflow generation from natural-language prompts with confidence scoring and confirm-before-create review
+- Template setup wizard with required fields, preflight checks, sample input copy, and run-readiness status
+- In-app starter walkthrough for first workflow creation and publish path
 - AI nodes: `transform_llm`, `document_understanding`, `clipboard_ai_transfer`
 - Integrations (`http_api`, `postgresql`, `mysql`, `mongodb`, `google_sheets`, `airtable`, `s3`)
 - Orchestrator queue with attended/unattended robots and dispatch lifecycle
@@ -68,7 +70,8 @@ Use built-in templates as a fast path from idea to first successful run:
 Create from UI:
 1. Open `Templates` in the left sidebar.
 2. Select a starter template.
-3. Click `Create Workflow`.
+3. Complete `Template Setup Wizard` fields and click `Validate Setup`.
+4. Click `Create Workflow`.
 
 ## Contributor Onboarding
 New contributors should start here:
@@ -145,6 +148,7 @@ Tag pushes (`v*.*.*`) trigger `.github/workflows/release.yml`, which reruns vali
 - `docs/ONBOARDING.md`
 - `docs/tutorials/FIRST_AUTOMATION_10_MIN.md`
 - `docs/examples/workflows/first-automation.workflow.json`
+- `docs/ACTIVITY_PACK_ROADMAP.md`
 - `docs/ARCHITECTURE.md`
 - `docs/API_REFERENCE.md`
 - `docs/DEPLOYMENT.md`

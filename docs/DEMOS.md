@@ -95,6 +95,20 @@ Expected outcome:
 - Key automation patterns (ingest, transform, branch, sync, alert) are prewired.
 - Contributors can extend templates without changing core runtime behavior.
 
+## Demo 7: Setup Wizard + Starter Walkthrough
+Goal: Show first-time user guidance from template selection to run readiness.
+
+1. Open `Templates` and select any starter template.
+2. Complete required fields in `Template Setup Wizard`.
+3. Click `Validate Setup` and confirm checks show `PASS`.
+4. Click `Copy Sample Input` and inspect JSON payload.
+5. Start `Starter Walkthrough` and progress through all steps.
+
+Expected outcome:
+- Setup friction is reduced with explicit required fields/checks.
+- Users can verify run readiness before creating workflow.
+- New users get an in-product path for template -> test -> publish.
+
 ## Demo Assets
 - Template source: `apps/server/src/lib/templates.ts`
 - Node catalog: `apps/web/src/lib/nodeCatalog.ts`
@@ -107,5 +121,6 @@ Expected outcome:
 - Demo 4: 4-6 minutes
 - Demo 5: 4-6 minutes
 - Demo 6: 8-10 minutes
+- Demo 7: 4-5 minutes
 
-Total: 31-40 minutes for a full product walkthrough.
+Total: 35-45 minutes for a full product walkthrough.

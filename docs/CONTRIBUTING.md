@@ -71,6 +71,7 @@ cd apps/web && npm test && npm run build
 - Required validation:
 ```bash
 cd apps/server && npm test && npm run build
+cd apps/server && npm run test:templates
 ```
 
 ### C. Docs/Community Changes
@@ -88,12 +89,14 @@ Use these templates when applicable:
 ## 6. Testing and CI
 CI in `.github/workflows/ci.yml` runs on PRs and `main` pushes:
 - `Server Test and Build`
+- `Template quality gate`
 - `Web Test and Build`
 - `Web E2E Smoke`
 
 Recommended full local validation before review:
 ```bash
 cd apps/server && npm test && npm run build
+cd apps/server && npm run test:templates
 cd apps/web && npm test && npm run build
 ```
 

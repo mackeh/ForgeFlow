@@ -55,6 +55,7 @@ import {
   getUpcomingSchedules,
   getSecrets,
   getSystemTime,
+  getTemplate,
   getTemplates,
   getWebhookEvents,
   getWebhooks,
@@ -94,14 +95,23 @@ import { Sidebar } from "./components/Sidebar";
 import { Inspector } from "./components/Inspector";
 import { useGlobalHotkeys } from "./hooks/useGlobalHotkeys";
 import { filterNodeOptions, NODE_OPTIONS } from "./lib/nodeCatalog";
+import { STARTER_WALKTHROUGH_STEPS, clampWalkthroughIndex } from "./lib/starterWalkthrough";
+import {
+  buildTemplateReadiness,
+  buildTemplateSetupInitialValues,
+  integrationExists
+} from "./lib/templateSetup";
 import { buildPersistedDefinition, hashDefinition } from "./lib/workflowDraft";
 import type {
   ActivityCatalog,
+  ActivityRoadmapPack,
   AutopilotPlan,
   MiningSummary,
   OrchestratorJob,
   OrchestratorOverview,
   OrchestratorRobot,
+  WorkflowTemplateDetail,
+  WorkflowTemplateSummary,
   WorkflowDefinition,
   WorkflowRecord,
   WorkflowRunDetail,
@@ -111,6 +121,7 @@ import type {
 } from "./types";
 
 const nodeTypes = { action: ActionNode };
+const WALKTHROUGH_DISMISSED_KEY = "forgeflow.walkthrough.dismissed.v1";
 type ToastLevel = "info" | "success" | "error";
 type ToastAction = {
   label: string;
@@ -175,6 +186,11 @@ type RecorderDraftEvent = {
   selector: string;
   value: string;
   text: string;
+};
+
+type TemplatePreflightState = {
+  status: "idle" | "running" | "pass" | "fail";
+  messages: string[];
 };
 
 type WorkflowPresence = {
@@ -370,10 +386,14 @@ export default function App() {
   const [secretKey, setSecretKey] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [workflowName, setWorkflowName] = useState("");
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<WorkflowTemplateSummary[]>([]);
+  const [templateDetailsById, setTemplateDetailsById] = useState<Record<string, WorkflowTemplateDetail>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateWorkflowName, setTemplateWorkflowName] = useState("");
   const [templateSearch, setTemplateSearch] = useState("");
+  const [templateSetupValues, setTemplateSetupValues] = useState<Record<string, string>>({});
+  const [templatePreflight, setTemplatePreflight] = useState<TemplatePreflightState>({ status: "idle", messages: [] });
+  const [templateSampleCopied, setTemplateSampleCopied] = useState(false);
   const [autopilotPrompt, setAutopilotPrompt] = useState("");
   const [autopilotWorkflowName, setAutopilotWorkflowName] = useState("");
   const [autopilotPlanDraft, setAutopilotPlanDraft] = useState<AutopilotPlan | null>(null);
@@ -441,6 +461,9 @@ export default function App() {
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
   const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetupPayload | null>(null);
   const [twoFactorToken, setTwoFactorToken] = useState("");
+  const [walkthroughActive, setWalkthroughActive] = useState(false);
+  const [walkthroughStepIndex, setWalkthroughStepIndex] = useState(0);
+  const [walkthroughDismissed, setWalkthroughDismissed] = useState(false);
 
   const nodesRef = useRef<Node[]>(nodes);
   const edgesRef = useRef<Edge[]>(edges);
@@ -610,6 +633,57 @@ export default function App() {
     () => (templates || []).find((template) => template.id === selectedTemplateId) || null,
     [templates, selectedTemplateId]
   );
+  const selectedTemplateDetail = useMemo(
+    () => (selectedTemplateId ? templateDetailsById[selectedTemplateId] || null : null),
+    [templateDetailsById, selectedTemplateId]
+  );
+  const selectedTemplateSetup = useMemo(
+    () => selectedTemplateDetail?.setup || selectedTemplate?.setup || null,
+    [selectedTemplateDetail, selectedTemplate]
+  );
+  const templateSetupReadiness = useMemo(
+    () =>
+      buildTemplateReadiness({
+        setup: selectedTemplateSetup,
+        values: templateSetupValues,
+        integrations,
+        preflightReady: templatePreflight.status === "pass"
+      }),
+    [selectedTemplateSetup, templateSetupValues, integrations, templatePreflight.status]
+  );
+  const activityRoadmapTop = useMemo(
+    () => ((activityCatalog?.roadmap || []) as ActivityRoadmapPack[]).slice(0, 6),
+    [activityCatalog?.roadmap]
+  );
+  const walkthroughStep = useMemo(
+    () => STARTER_WALKTHROUGH_STEPS[clampWalkthroughIndex(walkthroughStepIndex)] || STARTER_WALKTHROUGH_STEPS[0],
+    [walkthroughStepIndex]
+  );
+
+  useEffect(() => {
+    if (!token) return;
+    const dismissed = localStorage.getItem(WALKTHROUGH_DISMISSED_KEY) === "1";
+    setWalkthroughDismissed(dismissed);
+    if (!dismissed) {
+      setWalkthroughActive(true);
+      setWalkthroughStepIndex(0);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!selectedTemplateId || templateDetailsById[selectedTemplateId]) return;
+    getTemplate(selectedTemplateId)
+      .then((detail) => {
+        setTemplateDetailsById((current) => ({ ...current, [selectedTemplateId]: detail as WorkflowTemplateDetail }));
+      })
+      .catch(showError);
+  }, [selectedTemplateId, templateDetailsById]);
+
+  useEffect(() => {
+    setTemplateSampleCopied(false);
+    setTemplatePreflight({ status: "idle", messages: [] });
+    setTemplateSetupValues(buildTemplateSetupInitialValues(selectedTemplateSetup));
+  }, [selectedTemplateId, selectedTemplateSetup]);
 
   const activeSchedulePreset = useMemo(
     () => schedulePresets.find((preset) => preset.id === selectedSchedulePreset) || null,
@@ -773,9 +847,10 @@ export default function App() {
       .catch(showError);
     getTemplates()
       .then((list) => {
-        setTemplates(list || []);
-        if (Array.isArray(list) && list.length && !selectedTemplateId) {
-          setSelectedTemplateId(list[0].id);
+        const typed = Array.isArray(list) ? (list as WorkflowTemplateSummary[]) : [];
+        setTemplates(typed);
+        if (typed.length && !selectedTemplateId) {
+          setSelectedTemplateId(typed[0].id);
         }
       })
       .catch(showError);
@@ -1236,9 +1311,84 @@ export default function App() {
     await refreshDashboard();
   };
 
+  const handleTemplateSetupFieldChange = (fieldId: string, value: string) => {
+    setTemplateSetupValues((current) => ({ ...current, [fieldId]: value }));
+  };
+
+  const handleValidateTemplateSetup = async () => {
+    if (!selectedTemplateDetail?.definition) {
+      setFeedback("Template details are still loading", "info");
+      return;
+    }
+    setTemplatePreflight({ status: "running", messages: [] });
+    const result = await runPreflight({ definition: selectedTemplateDetail.definition });
+    setTemplatePreflight({
+      status: result.ready ? "pass" : "fail",
+      messages: Array.isArray(result.messages) ? result.messages.map((item) => String(item)) : []
+    });
+    if (result.ready) {
+      setFeedback("Template setup preflight passed", "success");
+    } else {
+      const msg = Array.isArray(result.messages) && result.messages.length ? result.messages.join(" | ") : "Preflight failed";
+      setFeedback(`Template setup preflight blocked: ${msg}`, "error");
+    }
+  };
+
+  const handleCopyTemplateSampleInput = async () => {
+    const sampleInput = selectedTemplateSetup?.sampleInput;
+    if (!sampleInput) {
+      setFeedback("No sample input available for selected template", "info");
+      return;
+    }
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(JSON.stringify(sampleInput, null, 2));
+      setTemplateSampleCopied(true);
+      setFeedback("Template sample input copied", "success");
+    } catch {
+      setFeedback("Unable to copy sample input", "error");
+    }
+  };
+
+  const handleStartWalkthrough = () => {
+    setWalkthroughDismissed(false);
+    localStorage.removeItem(WALKTHROUGH_DISMISSED_KEY);
+    setWalkthroughActive(true);
+    setWalkthroughStepIndex(0);
+    scrollSidebarSection(STARTER_WALKTHROUGH_STEPS[0].sectionId);
+  };
+
+  const handleWalkthroughDismiss = () => {
+    setWalkthroughDismissed(true);
+    setWalkthroughActive(false);
+    localStorage.setItem(WALKTHROUGH_DISMISSED_KEY, "1");
+  };
+
+  const handleWalkthroughNext = () => {
+    const next = clampWalkthroughIndex(walkthroughStepIndex + 1);
+    setWalkthroughStepIndex(next);
+    scrollSidebarSection(STARTER_WALKTHROUGH_STEPS[next].sectionId);
+  };
+
+  const handleWalkthroughPrev = () => {
+    const next = clampWalkthroughIndex(walkthroughStepIndex - 1);
+    setWalkthroughStepIndex(next);
+    scrollSidebarSection(STARTER_WALKTHROUGH_STEPS[next].sectionId);
+  };
+
   const handleCreateFromTemplate = async () => {
     if (!selectedTemplateId) {
       setFeedback("Select a template first", "error");
+      return;
+    }
+    if (!templateSetupReadiness.requiredComplete) {
+      setFeedback("Complete required template setup fields before creating workflow", "error");
+      return;
+    }
+    if (selectedTemplateSetup?.connectionChecks?.length && !templateSetupReadiness.checksReady) {
+      setFeedback("Template setup checks are not ready yet (run preflight/check integrations)", "error");
       return;
     }
     const created = await createWorkflowFromTemplate({
@@ -1249,6 +1399,9 @@ export default function App() {
     setWorkflowList((list) => [created, ...list]);
     await selectWorkflow(created);
     setFeedback("Workflow created from template", "success");
+    if (walkthroughActive) {
+      setWalkthroughStepIndex((current) => clampWalkthroughIndex(current + 1));
+    }
     await refreshDashboard();
   };
 
@@ -1320,6 +1473,10 @@ export default function App() {
     setVersions([]);
     setSecrets([]);
     setTemplates([]);
+    setTemplateDetailsById({});
+    setTemplateSetupValues({});
+    setTemplatePreflight({ status: "idle", messages: [] });
+    setTemplateSampleCopied(false);
     setActivityCatalog(null);
     setAutopilotPrompt("");
     setAutopilotWorkflowName("");
@@ -1349,6 +1506,9 @@ export default function App() {
     setTwoFactorStatus(null);
     setTwoFactorSetup(null);
     setTwoFactorToken("");
+    setWalkthroughActive(false);
+    setWalkthroughStepIndex(0);
+    setWalkthroughDismissed(false);
     setLoginTotpCode("");
     setSelectedNode(null);
     setSelectedEdgeId(null);
@@ -2684,6 +2844,47 @@ export default function App() {
         <small>
           User: <strong>{currentUser?.username || "-"}</strong> ({currentUser?.role || "unknown"})
         </small>
+        <div className="walkthrough-panel">
+          <strong>Starter Walkthrough</strong>
+          {!walkthroughActive ? (
+            <>
+              <small>{walkthroughDismissed ? "Walkthrough hidden for this browser." : "Run the first-time guided setup flow."}</small>
+              <div className="autopilot-plan-actions">
+                <button onClick={handleStartWalkthrough}>Start Walkthrough</button>
+                {!walkthroughDismissed ? (
+                  <button className="secondary" onClick={handleWalkthroughDismiss}>
+                    Hide
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              <small>
+                Step {clampWalkthroughIndex(walkthroughStepIndex) + 1} / {STARTER_WALKTHROUGH_STEPS.length}
+              </small>
+              <strong>{walkthroughStep.title}</strong>
+              <small>{walkthroughStep.description}</small>
+              <div className="autopilot-plan-actions">
+                <button className="secondary" onClick={handleWalkthroughPrev} disabled={walkthroughStepIndex <= 0}>
+                  Back
+                </button>
+                <button
+                  onClick={handleWalkthroughNext}
+                  disabled={walkthroughStepIndex >= STARTER_WALKTHROUGH_STEPS.length - 1}
+                >
+                  Next
+                </button>
+                <button className="secondary" onClick={() => scrollSidebarSection(walkthroughStep.sectionId)}>
+                  Jump
+                </button>
+                <button className="secondary" onClick={handleWalkthroughDismiss}>
+                  Done
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <div className="sidebar-jump">
           {sidebarShortcuts.map((item) => (
             <button key={item.id} className="chip" onClick={() => scrollSidebarSection(item.id)}>
@@ -2867,6 +3068,12 @@ export default function App() {
               Activity Library: {activityCatalog.currentTotal} total ({activityCatalog.availableCount} available,{" "}
               {activityCatalog.plannedCount} planned) · target {activityCatalog.targetLibrarySize}+
             </small>
+            {activityCatalog.phaseFocus ? (
+              <small>
+                Delivery focus: now {activityCatalog.phaseFocus.now} · next {activityCatalog.phaseFocus.next} · later{" "}
+                {activityCatalog.phaseFocus.later}
+              </small>
+            ) : null}
             <div className="selected-events">
               {Object.entries(activityCatalog.byCategory)
                 .sort((a, b) => b[1] - a[1])
@@ -2877,6 +3084,16 @@ export default function App() {
                   </span>
                 ))}
             </div>
+            {activityRoadmapTop.length ? (
+              <div className="template-preview">
+                <strong>Phase Roadmap Packs</strong>
+                {activityRoadmapTop.map((pack) => (
+                  <small key={pack.id}>
+                    {pack.label}: {pack.available}/{pack.total} available ({pack.phase})
+                  </small>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
         <h3 id="sidebar-templates">Templates</h3>
@@ -2913,6 +3130,62 @@ export default function App() {
             <small>{selectedTemplate.description}</small>
             <small>{selectedTemplate.useCase}</small>
             <small>{Array.isArray(selectedTemplate.tags) ? selectedTemplate.tags.join(", ") : ""}</small>
+            <small>
+              Setup readiness:{" "}
+              {templateSetupReadiness.ready
+                ? "ready"
+                : `${templateSetupReadiness.requiredDone}/${templateSetupReadiness.requiredTotal} required fields complete`}
+            </small>
+          </div>
+        ) : null}
+        {selectedTemplateSetup ? (
+          <div className="template-preview">
+            <strong>Template Setup Wizard</strong>
+            {(selectedTemplateSetup.requiredInputs || []).map((field) => (
+              <div key={field.id} className="template-setup-field">
+                <small>
+                  {field.label}
+                  {field.required ? " *" : ""}
+                </small>
+                <input
+                  value={templateSetupValues[field.id] || ""}
+                  onChange={(e) => handleTemplateSetupFieldChange(field.id, e.target.value)}
+                  placeholder={field.placeholder || field.defaultValue || ""}
+                />
+                {field.help ? <small>{field.help}</small> : null}
+              </div>
+            ))}
+            {(selectedTemplateSetup.connectionChecks || []).length ? <small>Connection checks</small> : null}
+            {(selectedTemplateSetup.connectionChecks || []).map((check) => {
+              const ok = check.type === "preflight" ? templatePreflight.status === "pass" : integrationExists(check.integrationId, integrations);
+              return (
+                <small key={check.id}>
+                  {ok ? "PASS" : "PENDING"} - {check.label}
+                </small>
+              );
+            })}
+            {templatePreflight.messages.length ? (
+              <div className="autopilot-plan-warnings">
+                {templatePreflight.messages.slice(0, 3).map((message, index) => (
+                  <small key={`${message}-${index}`}>{message}</small>
+                ))}
+              </div>
+            ) : null}
+            <div className="autopilot-plan-actions">
+              <button
+                className={templatePreflight.status === "running" ? "is-loading" : ""}
+                disabled={templatePreflight.status === "running" || !selectedTemplateDetail}
+                onClick={() => {
+                  withActionLoading("template-preflight", handleValidateTemplateSetup);
+                }}
+              >
+                {templatePreflight.status === "running" ? "Validating..." : "Validate Setup"}
+              </button>
+              <button className="secondary" onClick={() => handleCopyTemplateSampleInput().catch(showError)}>
+                {templateSampleCopied ? "Sample Copied" : "Copy Sample Input"}
+              </button>
+            </div>
+            <small>Sample input is copied as JSON for test-mode runs.</small>
           </div>
         ) : null}
         <input
@@ -2921,11 +3194,15 @@ export default function App() {
           placeholder="New workflow name (optional)"
         />
         <button
-          disabled={isActionLoading("create-template")}
+          disabled={isActionLoading("create-template") || !templateSetupReadiness.ready}
           className={isActionLoading("create-template") ? "is-loading" : ""}
           onClick={() => withActionLoading("create-template", handleCreateFromTemplate)}
         >
-          {isActionLoading("create-template") ? "Creating..." : "Create From Template"}
+          {isActionLoading("create-template")
+            ? "Creating..."
+            : templateSetupReadiness.ready
+              ? "Create From Template"
+              : "Complete Setup to Create"}
         </button>
         <h3 id="sidebar-integrations">Integrations</h3>
         <input

@@ -10,6 +10,7 @@ This folder contains the long-form technical documentation for operators and con
 - [Contributing Guide](./CONTRIBUTING.md): development setup, testing workflow, coding standards, and contribution process.
 - [Demo Guide](./DEMOS.md): repeatable walkthroughs for product capability demos.
 - [Starter Templates](../apps/server/src/lib/templates.ts): built-in production workflow baselines.
+- [Activity Pack Roadmap](./ACTIVITY_PACK_ROADMAP.md): phased activity expansion and refactor/remove policy.
 - [Contributor Onboarding](./ONBOARDING.md): fast path for first-time contributors.
 - [First Automation Tutorial](./tutorials/FIRST_AUTOMATION_10_MIN.md): a 10-minute path from setup to successful test run.
 - [Starter Workflow Example](./examples/workflows/first-automation.workflow.json): importable workflow file used in onboarding.
