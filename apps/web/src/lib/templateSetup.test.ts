@@ -3,7 +3,8 @@ import {
   buildTemplateReadiness,
   buildTemplateSetupInitialValues,
   buildTemplateSetupProgress,
-  integrationExists
+  integrationExists,
+  resolveIntegrationCheckId
 } from "./templateSetup";
 
 describe("template setup helpers", () => {
@@ -48,5 +49,19 @@ describe("template setup helpers", () => {
     });
     expect(readiness.ready).toBe(true);
     expect(readiness.checksReady).toBe(true);
+  });
+
+  test("resolveIntegrationCheckId uses integration field override", () => {
+    const mapped = resolveIntegrationCheckId({
+      setup: {
+        ...setup,
+        requiredInputs: [
+          { id: "finance_api", label: "Finance API", kind: "integration", required: true, defaultValue: "finance_api" }
+        ]
+      },
+      values: { finance_api: "finance_prod" },
+      integrationId: "finance_api"
+    });
+    expect(mapped).toBe("finance_prod");
   });
 });

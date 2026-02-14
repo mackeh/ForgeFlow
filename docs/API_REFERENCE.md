@@ -73,6 +73,11 @@ Activity catalog response also includes:
 - `roadmap[]`: ordered pack rollout view (`id`, `label`, `phase`, availability)
 - `phaseFocus`: current/next/later implementation focus
 
+`POST /api/workflows/from-template` payload supports optional setup injection:
+- `templateId` (required)
+- `name` (optional)
+- `setupValues` (optional object): values used to replace `{{setup.<key>}}` placeholders in the template definition before workflow creation.
+
 ## 6. Document Intelligence and Orchestrator
 
 | Method | Path | Permission | Description |

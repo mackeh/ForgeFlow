@@ -234,7 +234,7 @@ export function getMiningSummary(days = 14) {
   return request<MiningSummary>(`/api/mining/summary?${q.toString()}`);
 }
 
-export function createWorkflowFromTemplate(payload: { templateId: string; name?: string }) {
+export function createWorkflowFromTemplate(payload: { templateId: string; name?: string; setupValues?: Record<string, unknown> }) {
   return request<WorkflowRecord>("/api/workflows/from-template", {
     method: "POST",
     body: JSON.stringify(payload)

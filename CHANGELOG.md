@@ -26,6 +26,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 - CI now includes browser smoke validation (`Web E2E Smoke`).
 - CI server job now runs an explicit template quality gate (`npm run test:templates`).
+- `POST /api/workflows/from-template` now applies `setupValues` into template placeholders so generated workflows use environment-specific URLs/selectors/integration IDs.
 - Web editor keyboard shortcuts now include undo/redo and selection-aware delete behavior.
 - Web recorder now follows capture -> review -> insert flow instead of immediate node injection.
 - Autopilot now requires explicit confirm-before-create flow and uses richer starter templates for vague prompts.

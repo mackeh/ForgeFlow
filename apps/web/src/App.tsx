@@ -99,7 +99,8 @@ import { STARTER_WALKTHROUGH_STEPS, clampWalkthroughIndex } from "./lib/starterW
 import {
   buildTemplateReadiness,
   buildTemplateSetupInitialValues,
-  integrationExists
+  integrationExists,
+  resolveIntegrationCheckId
 } from "./lib/templateSetup";
 import { buildPersistedDefinition, hashDefinition } from "./lib/workflowDraft";
 import type {
@@ -1391,9 +1392,26 @@ export default function App() {
       setFeedback("Template setup checks are not ready yet (run preflight/check integrations)", "error");
       return;
     }
+    const setupValues = Object.entries(templateSetupValues).reduce<Record<string, unknown>>((acc, [key, value]) => {
+      const trimmed = String(value || "").trim();
+      if (!trimmed) return acc;
+      const field = selectedTemplateSetup?.requiredInputs?.find((item) => item.id === key);
+      if (field?.kind === "json") {
+        try {
+          acc[key] = JSON.parse(trimmed);
+          return acc;
+        } catch {
+          acc[key] = trimmed;
+          return acc;
+        }
+      }
+      acc[key] = trimmed;
+      return acc;
+    }, {});
     const created = await createWorkflowFromTemplate({
       templateId: selectedTemplateId,
-      name: templateWorkflowName.trim() || undefined
+      name: templateWorkflowName.trim() || undefined,
+      setupValues
     });
     setTemplateWorkflowName("");
     setWorkflowList((list) => [created, ...list]);
@@ -3157,7 +3175,12 @@ export default function App() {
             ))}
             {(selectedTemplateSetup.connectionChecks || []).length ? <small>Connection checks</small> : null}
             {(selectedTemplateSetup.connectionChecks || []).map((check) => {
-              const ok = check.type === "preflight" ? templatePreflight.status === "pass" : integrationExists(check.integrationId, integrations);
+              const integrationTarget = resolveIntegrationCheckId({
+                setup: selectedTemplateSetup,
+                values: templateSetupValues,
+                integrationId: check.integrationId
+              });
+              const ok = check.type === "preflight" ? templatePreflight.status === "pass" : integrationExists(integrationTarget, integrations);
               return (
                 <small key={check.id}>
                   {ok ? "PASS" : "PENDING"} - {check.label}
