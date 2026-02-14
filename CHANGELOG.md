@@ -17,9 +17,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Autopilot plan diagnostics: overall confidence score, node-level insights, and fallback template options.
 - Contributor onboarding package: 10-minute tutorial, starter workflow file, and reusable docs templates.
 - Real-world starter template pack (invoice approval, web scrape sync, CSV cleanup, email triage, health check alert).
+- Template setup metadata and `GET /api/templates/:templateId` endpoint for wizard-driven setup.
+- Template setup wizard in UI with required fields, connection checks, sample-input copy, and preflight-based readiness.
+- Starter walkthrough panel in UI for first workflow onboarding.
+- Activity pack roadmap model (`pack`, `phase`) with phase-focus summary in `/api/activities`.
+- Activity roadmap doc: `docs/ACTIVITY_PACK_ROADMAP.md`.
 
 ### Changed
 - CI now includes browser smoke validation (`Web E2E Smoke`).
+- CI server job now runs an explicit template quality gate (`npm run test:templates`).
 - Web editor keyboard shortcuts now include undo/redo and selection-aware delete behavior.
 - Web recorder now follows capture -> review -> insert flow instead of immediate node injection.
 - Autopilot now requires explicit confirm-before-create flow and uses richer starter templates for vague prompts.

@@ -217,14 +217,38 @@ export async function installMockApi(page: Page) {
           id: "template-demo",
           name: "Demo Template",
           category: "General",
-          difficulty: "easy",
+          difficulty: "starter",
           nodes: 3,
           description: "Demo template",
           useCase: "Smoke",
           tags: ["demo"],
-          definition: defaultDefinition()
+          setup: {
+            requiredInputs: [{ id: "api_url", label: "API URL", kind: "url", required: true, defaultValue: "https://example.com" }],
+            connectionChecks: [{ id: "preflight", label: "Template preflight readiness", type: "preflight" }],
+            sampleInput: { source: "smoke" },
+            runbook: ["Run in test mode first"]
+          }
         }
       ]);
+    }
+    if (path === "/api/templates/template-demo" && method === "GET") {
+      return json(route, {
+        id: "template-demo",
+        name: "Demo Template",
+        category: "General",
+        difficulty: "starter",
+        nodes: 3,
+        description: "Demo template",
+        useCase: "Smoke",
+        tags: ["demo"],
+        setup: {
+          requiredInputs: [{ id: "api_url", label: "API URL", kind: "url", required: true, defaultValue: "https://example.com" }],
+          connectionChecks: [{ id: "preflight", label: "Template preflight readiness", type: "preflight" }],
+          sampleInput: { source: "smoke" },
+          runbook: ["Run in test mode first"]
+        },
+        definition: defaultDefinition()
+      });
     }
     if (path === "/api/activities" && method === "GET") {
       return json(route, {
@@ -233,6 +257,11 @@ export async function installMockApi(page: Page) {
         availableCount: 20,
         plannedCount: 10,
         byCategory: { Core: 8, Web: 6, AI: 4, Data: 6, Control: 6 },
+        byPhase: { "phase-1": 20, "phase-2": 10, "phase-3": 0 },
+        roadmap: [
+          { id: "system-core", label: "System & Core", phase: "phase-1", total: 10, available: 6, planned: 4, activityIds: [] }
+        ],
+        phaseFocus: { now: "phase-1", next: "phase-2", later: "phase-3" },
         items: []
       });
     }

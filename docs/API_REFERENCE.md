@@ -56,6 +56,7 @@ Base URL (local): `http://localhost:8080`
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | GET | `/api/templates` | `templates:read` | List built-in workflow templates |
+| GET | `/api/templates/:templateId` | `templates:read` | Fetch full template definition + setup guide |
 | GET | `/api/activities` | `templates:read` | List activity catalog (available + planned packs) |
 | POST | `/api/autopilot/plan` | `workflows:write` | Generate workflow draft definition from natural-language prompt |
 | POST | `/api/workflows/from-template` | `workflows:write` | Create workflow from template |
@@ -66,6 +67,11 @@ Built-in production starter template IDs:
 - `csv-cleanup-validation`
 - `email-triage-ticket-create`
 - `scheduled-health-check-alert`
+
+Activity catalog response also includes:
+- `byPhase`, `byPack`: coverage counters for roadmap planning
+- `roadmap[]`: ordered pack rollout view (`id`, `label`, `phase`, availability)
+- `phaseFocus`: current/next/later implementation focus
 
 ## 6. Document Intelligence and Orchestrator
 

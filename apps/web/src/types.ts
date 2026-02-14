@@ -73,9 +73,21 @@ export type ActivityCatalogItem = {
   id: string;
   label: string;
   category: string;
+  pack?: string;
+  phase?: "phase-1" | "phase-2" | "phase-3";
   status: "available" | "planned";
   description: string;
   aliases?: string[];
+};
+
+export type ActivityRoadmapPack = {
+  id: string;
+  label: string;
+  phase: "phase-1" | "phase-2" | "phase-3";
+  total: number;
+  available: number;
+  planned: number;
+  activityIds: string[];
 };
 
 export type ActivityCatalog = {
@@ -84,7 +96,55 @@ export type ActivityCatalog = {
   availableCount: number;
   plannedCount: number;
   byCategory: Record<string, number>;
+  byPhase?: Record<string, number>;
+  byPack?: Record<string, number>;
+  roadmap?: ActivityRoadmapPack[];
+  phaseFocus?: {
+    now: "phase-1" | "phase-2" | "phase-3";
+    next: "phase-1" | "phase-2" | "phase-3";
+    later: "phase-1" | "phase-2" | "phase-3";
+  };
   items: ActivityCatalogItem[];
+};
+
+export type TemplateSetupField = {
+  id: string;
+  label: string;
+  kind: "text" | "url" | "integration" | "selector" | "json";
+  required: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+  help?: string;
+};
+
+export type TemplateSetupCheck = {
+  id: string;
+  label: string;
+  type: "preflight" | "integration";
+  integrationId?: string;
+};
+
+export type TemplateSetupGuide = {
+  requiredInputs: TemplateSetupField[];
+  connectionChecks: TemplateSetupCheck[];
+  sampleInput: Record<string, unknown>;
+  runbook: string[];
+};
+
+export type WorkflowTemplateSummary = {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  difficulty?: string;
+  useCase?: string;
+  tags?: string[];
+  nodes?: number;
+  setup?: TemplateSetupGuide;
+};
+
+export type WorkflowTemplateDetail = WorkflowTemplateSummary & {
+  definition: WorkflowDefinition;
 };
 
 export type AutopilotPlan = {

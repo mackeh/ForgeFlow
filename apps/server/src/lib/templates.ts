@@ -6,7 +6,32 @@ export type WorkflowTemplate = {
   difficulty: "starter" | "intermediate" | "advanced";
   useCase: string;
   tags: string[];
+  setup?: TemplateSetupGuide;
   definition: Record<string, unknown>;
+};
+
+export type TemplateSetupField = {
+  id: string;
+  label: string;
+  kind: "text" | "url" | "integration" | "selector" | "json";
+  required: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+  help?: string;
+};
+
+export type TemplateSetupCheck = {
+  id: string;
+  label: string;
+  type: "preflight" | "integration";
+  integrationId?: string;
+};
+
+export type TemplateSetupGuide = {
+  requiredInputs: TemplateSetupField[];
+  connectionChecks: TemplateSetupCheck[];
+  sampleInput: Record<string, unknown>;
+  runbook: string[];
 };
 
 const executionDefaults = {
@@ -24,6 +49,45 @@ const templates: WorkflowTemplate[] = [
     difficulty: "intermediate",
     useCase: "Invoice capture and governance workflow with human oversight.",
     tags: ["invoice", "document", "approval", "integration"],
+    setup: {
+      requiredInputs: [
+        {
+          id: "finance_api",
+          label: "Finance integration profile",
+          kind: "integration",
+          required: true,
+          defaultValue: "finance_api",
+          help: "Create an integration profile used by the sync node."
+        },
+        {
+          id: "approval_threshold",
+          label: "Approval threshold amount",
+          kind: "text",
+          required: true,
+          defaultValue: "10000",
+          placeholder: "10000"
+        },
+        {
+          id: "invoice_fields",
+          label: "Required invoice fields",
+          kind: "text",
+          required: true,
+          defaultValue: "invoice_number,vendor,total,due_date,currency"
+        }
+      ],
+      connectionChecks: [
+        { id: "invoice-preflight", label: "Template preflight readiness", type: "preflight" },
+        { id: "invoice-finance-integration", label: "Finance integration exists", type: "integration", integrationId: "finance_api" }
+      ],
+      sampleInput: {
+        invoiceRawText: "Invoice Number: INV-2026-0042\nVendor: Example AB\nTotal: 12850.00\nCurrency: USD\nDue Date: 2026-03-01"
+      },
+      runbook: [
+        "Replace sample invoice text with source data from your intake channel.",
+        "Confirm approval policy/threshold before publishing.",
+        "Run in test mode once and verify sync payload."
+      ]
+    },
     definition: {
       nodes: [
         { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
@@ -157,6 +221,41 @@ const templates: WorkflowTemplate[] = [
     difficulty: "intermediate",
     useCase: "Move structured data from browser UI into backend systems.",
     tags: ["scrape", "playwright", "api", "sync"],
+    setup: {
+      requiredInputs: [
+        {
+          id: "source_url",
+          label: "Source portal URL",
+          kind: "url",
+          required: true,
+          defaultValue: "https://example.com/reports/orders"
+        },
+        {
+          id: "table_selector",
+          label: "Table selector",
+          kind: "selector",
+          required: true,
+          defaultValue: "table tbody"
+        },
+        {
+          id: "target_api_url",
+          label: "Target API URL",
+          kind: "url",
+          required: true,
+          defaultValue: "https://example.com/api/order-sync"
+        }
+      ],
+      connectionChecks: [{ id: "web-sync-preflight", label: "Template preflight readiness", type: "preflight" }],
+      sampleInput: {
+        source: "orders-report",
+        trigger: "manual"
+      },
+      runbook: [
+        "Update selectors against the live page before running unattended.",
+        "Confirm API auth and request body schema.",
+        "Run once in test mode and inspect extracted rows."
+      ]
+    },
     definition: {
       nodes: [
         { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
@@ -235,6 +334,33 @@ const templates: WorkflowTemplate[] = [
     difficulty: "starter",
     useCase: "Prepare spreadsheet exports for reliable downstream ingestion.",
     tags: ["csv", "cleanup", "validation", "etl"],
+    setup: {
+      requiredInputs: [
+        {
+          id: "csv_schema",
+          label: "Expected CSV columns",
+          kind: "text",
+          required: true,
+          defaultValue: "id,email,total"
+        },
+        {
+          id: "import_api_url",
+          label: "Import API URL",
+          kind: "url",
+          required: true,
+          defaultValue: "https://example.com/api/csv-import"
+        }
+      ],
+      connectionChecks: [{ id: "csv-preflight", label: "Template preflight readiness", type: "preflight" }],
+      sampleInput: {
+        csvText: "id,email,total\n1,alice@example.com,120.50\n2,bob@example.com,94.00"
+      },
+      runbook: [
+        "Replace starter CSV rows with representative production samples.",
+        "Extend validation schema to include required business fields.",
+        "Run in test mode and confirm rejected-row handling."
+      ]
+    },
     definition: {
       nodes: [
         { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
@@ -306,6 +432,36 @@ const templates: WorkflowTemplate[] = [
     difficulty: "intermediate",
     useCase: "Convert inbox workload into structured ticket operations.",
     tags: ["email", "triage", "ticketing", "approval"],
+    setup: {
+      requiredInputs: [
+        {
+          id: "helpdesk_api",
+          label: "Helpdesk integration profile",
+          kind: "integration",
+          required: true,
+          defaultValue: "helpdesk_api"
+        },
+        {
+          id: "priority_labels",
+          label: "Priority labels",
+          kind: "text",
+          required: true,
+          defaultValue: "high,medium,low"
+        }
+      ],
+      connectionChecks: [
+        { id: "email-preflight", label: "Template preflight readiness", type: "preflight" },
+        { id: "email-helpdesk-integration", label: "Helpdesk integration exists", type: "integration", integrationId: "helpdesk_api" }
+      ],
+      sampleInput: {
+        emailBody: "Subject: Unable to process payroll export\nPriority: high\nBody: payroll API returns 500 for 3 hours."
+      },
+      runbook: [
+        "Tune triage prompt for your support taxonomy.",
+        "Map ticket payload fields to your destination system.",
+        "Run test mode and verify approval path for high priority."
+      ]
+    },
     definition: {
       nodes: [
         { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
@@ -410,6 +566,33 @@ const templates: WorkflowTemplate[] = [
     difficulty: "starter",
     useCase: "Operational monitoring workflow for scheduled execution.",
     tags: ["health-check", "alerting", "ops", "schedule"],
+    setup: {
+      requiredInputs: [
+        {
+          id: "health_url",
+          label: "Health endpoint URL",
+          kind: "url",
+          required: true,
+          defaultValue: "https://example.com/health"
+        },
+        {
+          id: "alert_webhook",
+          label: "Alert webhook URL",
+          kind: "url",
+          required: true,
+          defaultValue: "https://example.com/webhooks/alerts"
+        }
+      ],
+      connectionChecks: [{ id: "health-preflight", label: "Template preflight readiness", type: "preflight" }],
+      sampleInput: {
+        source: "scheduled-health-check"
+      },
+      runbook: [
+        "Attach this workflow to a schedule preset before enabling unattended mode.",
+        "Verify alert endpoint ownership and retry policy.",
+        "Run a simulated degraded response to validate routing."
+      ]
+    },
     definition: {
       nodes: [
         { id: "start", type: "action", position: { x: 80, y: 80 }, data: { type: "start", label: "Start" } },
@@ -972,8 +1155,107 @@ const templates: WorkflowTemplate[] = [
   }
 ];
 
+function sanitizeId(input: string) {
+  return input.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function inferTemplateSetup(template: WorkflowTemplate): TemplateSetupGuide {
+  const nodes = Array.isArray((template.definition as any)?.nodes) ? ((template.definition as any).nodes as Array<Record<string, any>>) : [];
+  const integrationIds = new Set<string>();
+  const placeholders = new Set<string>();
+
+  const collect = (value: unknown) => {
+    if (typeof value === "string") {
+      for (const match of value.matchAll(/{{\s*([a-zA-Z0-9_.-]+)\s*}}/g)) {
+        if (match[1]) placeholders.add(match[1]);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) collect(item);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const nested of Object.values(value as Record<string, unknown>)) collect(nested);
+    }
+  };
+
+  for (const node of nodes) {
+    const data = node?.data as Record<string, unknown> | undefined;
+    if (!data) continue;
+    const integrationId = typeof data.integrationId === "string" ? data.integrationId.trim() : "";
+    if (integrationId) integrationIds.add(integrationId);
+    collect(data);
+  }
+
+  const requiredInputs: TemplateSetupField[] = [
+    ...Array.from(integrationIds).map((integrationId) => ({
+      id: `integration-${sanitizeId(integrationId)}`,
+      label: `Integration profile: ${integrationId}`,
+      kind: "integration" as const,
+      required: true,
+      defaultValue: integrationId
+    })),
+    ...Array.from(placeholders)
+      .slice(0, 3)
+      .map((key) => ({
+        id: `input-${sanitizeId(key)}`,
+        label: `Input value: ${key}`,
+        kind: "text" as const,
+        required: false,
+        placeholder: `sample-${key}`
+      }))
+  ];
+  if (!requiredInputs.length) {
+    requiredInputs.push({
+      id: "review-notes",
+      label: "Template review notes",
+      kind: "text",
+      required: false,
+      placeholder: "record any selector/endpoint adjustments before first run"
+    });
+  }
+
+  const sampleInput = Array.from(placeholders)
+    .slice(0, 5)
+    .reduce<Record<string, unknown>>((acc, key) => {
+      acc[key] = `sample-${key}`;
+      return acc;
+    }, {});
+
+  return {
+    requiredInputs,
+    connectionChecks: [
+      { id: `${template.id}-preflight`, label: "Template preflight readiness", type: "preflight" },
+      ...Array.from(integrationIds).map((integrationId) => ({
+        id: `${template.id}-integration-${sanitizeId(integrationId)}`,
+        label: `Integration exists: ${integrationId}`,
+        type: "integration" as const,
+        integrationId
+      }))
+    ],
+    sampleInput: Object.keys(sampleInput).length ? sampleInput : { source: "demo" },
+    runbook: [
+      "Fill required setup values before first run.",
+      "Run in test mode and inspect logs/context outputs.",
+      "Publish only after successful test validation."
+    ]
+  };
+}
+
+function withResolvedSetup(template: WorkflowTemplate): WorkflowTemplate & { setup: TemplateSetupGuide } {
+  return {
+    ...template,
+    setup: template.setup || inferTemplateSetup(template)
+  };
+}
+
+export function listWorkflowTemplateDefinitions() {
+  return templates.map((template) => withResolvedSetup(template));
+}
+
 export function listWorkflowTemplates() {
-  return templates.map((template) => ({
+  return listWorkflowTemplateDefinitions().map((template) => ({
     id: template.id,
     name: template.name,
     description: template.description,
@@ -981,10 +1263,12 @@ export function listWorkflowTemplates() {
     difficulty: template.difficulty,
     useCase: template.useCase,
     tags: template.tags,
+    setup: template.setup,
     nodes: Array.isArray((template.definition as any)?.nodes) ? (template.definition as any).nodes.length : 0
   }));
 }
 
 export function getWorkflowTemplate(templateId: string) {
-  return templates.find((template) => template.id === templateId) || null;
+  const template = templates.find((item) => item.id === templateId);
+  return template ? withResolvedSetup(template) : null;
 }

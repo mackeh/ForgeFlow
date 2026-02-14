@@ -290,6 +290,23 @@ button.is-loading {
   color: var(--muted);
 }
 
+.template-setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.walkthrough-panel {
+  border: 1px solid rgba(44, 185, 176, 0.35);
+  background: rgba(44, 185, 176, 0.08);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .autopilot-plan {
   border: 1px solid rgba(44, 185, 176, 0.35);
   background: rgba(44, 185, 176, 0.08);
