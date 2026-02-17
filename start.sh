@@ -3,6 +3,31 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
+
+check_requirements() {
+  echo "Checking system requirements..."
+  
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "❌ Error: 'docker' command not found."
+    echo "   Please install Docker: https://docs.docker.com/get-docker/"
+    exit 1
+  fi
+
+  if ! docker info >/dev/null 2>&1; then
+    echo "❌ Error: Docker daemon is not running or you need to add your user to the 'docker' group."
+    exit 1
+  fi
+
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "❌ Error: 'docker compose' command not found."
+    echo "   Please install Docker Compose plugin."
+    exit 1
+  fi
+
+  echo "✅ Docker requirements met."
+}
+
+check_requirements
 AUTO_UPDATE="${AUTO_UPDATE:-1}"
 AUTO_X11_AUTH="${AUTO_X11_AUTH:-1}"
 
